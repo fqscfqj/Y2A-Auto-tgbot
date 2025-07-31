@@ -1,6 +1,20 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+from enum import Enum
+
+
+class GuideStep(Enum):
+    """引导步骤枚举"""
+    NOT_STARTED = "not_started"          # 未开始引导
+    WELCOME = "welcome"                 # 欢迎步骤
+    INTRO_FEATURES = "intro_features"    # 介绍功能
+    CONFIG_API = "config_api"           # 配置API地址
+    CONFIG_PASSWORD = "config_password" # 配置密码
+    TEST_CONNECTION = "test_connection" # 测试连接
+    SEND_EXAMPLE = "send_example"       # 发送示例链接
+    COMPLETED = "completed"             # 引导完成
+    SKIPPED = "skipped"                 # 跳过引导
 
 @dataclass
 class User:
@@ -164,3 +178,113 @@ class UserStats:
         if self.total_forwards == 0:
             return 0.0
         return (self.successful_forwards / self.total_forwards) * 100
+
+
+@dataclass
+class UserGuide:
+    """用户引导模型"""
+    id: Optional[int] = None
+    user_id: Optional[int] = None
+    current_step: Optional[str] = None  # GuideStep枚举值
+    completed_steps: Optional[str] = None  # JSON格式存储已完成的步骤
+    is_completed: bool = False
+    is_skipped: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'UserGuide':
+        """从字典创建UserGuide实例"""
+        created_at = datetime.fromisoformat(data['created_at']) if data.get('created_at') else None
+        updated_at = datetime.fromisoformat(data['updated_at']) if data.get('updated_at') else None
+        
+        return cls(
+            id=data.get('id'),
+            user_id=data.get('user_id'),
+            current_step=data.get('current_step'),
+            completed_steps=data.get('completed_steps'),
+            is_completed=bool(data.get('is_completed', False)),
+            is_skipped=bool(data.get('is_skipped', False)),
+            created_at=created_at,
+            updated_at=updated_at
+        )
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'current_step': self.current_step,
+            'completed_steps': self.completed_steps,
+            'is_completed': self.is_completed,
+            'is_skipped': self.is_skipped,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+    def mark_step_completed(self, step: str) -> None:
+        """标记步骤为已完成"""
+        import json
+        
+        # 解析已完成的步骤
+        completed_steps = []
+        if self.completed_steps:
+            try:
+                completed_steps = json.loads(self.completed_steps)
+            except json.JSONDecodeError:
+                completed_steps = []
+        
+        # 添加新步骤（如果尚未完成）
+        if step not in completed_steps:
+            completed_steps.append(step)
+            self.completed_steps = json.dumps(completed_steps)
+        
+        # 更新时间
+        self.updated_at = datetime.now()
+    
+    def is_step_completed(self, step: str) -> bool:
+        """检查步骤是否已完成"""
+        import json
+        
+        if not self.completed_steps:
+            return False
+        
+        try:
+            completed_steps = json.loads(self.completed_steps)
+            return step in completed_steps
+        except json.JSONDecodeError:
+            return False
+    
+    def get_next_step(self) -> Optional[str]:
+        """获取下一步骤"""
+        if self.is_completed or self.is_skipped:
+            return None
+        
+        # 定义步骤顺序
+        step_order = [
+            GuideStep.WELCOME.value,
+            GuideStep.INTRO_FEATURES.value,
+            GuideStep.CONFIG_API.value,
+            GuideStep.CONFIG_PASSWORD.value,
+            GuideStep.TEST_CONNECTION.value,
+            GuideStep.SEND_EXAMPLE.value
+        ]
+        
+        # 如果当前步骤为空，返回第一步
+        if not self.current_step:
+            return step_order[0]
+        
+        # 找到当前步骤在顺序中的位置
+        try:
+            current_index = step_order.index(self.current_step)
+            if current_index < len(step_order) - 1:
+                return step_order[current_index + 1]
+        except ValueError:
+            # 如果当前步骤不在顺序中，返回第一步
+            return step_order[0]
+        
+        # 如果已经是最后一步，标记为完成
+        self.is_completed = True
+        self.current_step = GuideStep.COMPLETED.value
+        self.updated_at = datetime.now()
+        return None

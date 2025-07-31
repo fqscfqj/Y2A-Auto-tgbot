@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from src.database.db import execute_query, execute_update, execute_insert
-from src.database.models import User, UserConfig, ForwardRecord, UserStats
+from src.database.models import User, UserConfig, ForwardRecord, UserStats, UserGuide
 
 logger = logging.getLogger(__name__)
 
@@ -306,3 +306,117 @@ class UserStatsRepository:
         query = "SELECT * FROM user_stats ORDER BY updated_at DESC"
         results = execute_query(query)
         return [UserStats.from_dict(row) for row in results]
+
+class UserGuideRepository:
+    """用户引导数据访问层"""
+    
+    @staticmethod
+    def get_by_user_id(user_id: int) -> Optional[UserGuide]:
+        """通过用户ID获取引导信息"""
+        query = "SELECT * FROM user_guides WHERE user_id = ?"
+        results = execute_query(query, (user_id,))
+        
+        if results:
+            return UserGuide.from_dict(results[0])
+        return None
+    
+    @staticmethod
+    def create(guide: UserGuide) -> int:
+        """创建用户引导记录"""
+        query = """
+        INSERT INTO user_guides (user_id, current_step, completed_steps, is_completed, is_skipped, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        now = datetime.now()
+        params = (
+            guide.user_id,
+            guide.current_step,
+            guide.completed_steps,
+            guide.is_completed,
+            guide.is_skipped,
+            now,
+            now
+        )
+        
+        guide_id = execute_insert(query, params)
+        return guide_id
+    
+    @staticmethod
+    def update(guide: UserGuide) -> bool:
+        """更新用户引导信息"""
+        query = """
+        UPDATE user_guides SET
+            current_step = ?,
+            completed_steps = ?,
+            is_completed = ?,
+            is_skipped = ?,
+            updated_at = ?
+        WHERE id = ?
+        """
+        params = (
+            guide.current_step,
+            guide.completed_steps,
+            guide.is_completed,
+            guide.is_skipped,
+            datetime.now(),
+            guide.id
+        )
+        
+        rows_affected = execute_update(query, params)
+        return rows_affected > 0
+    
+    @staticmethod
+    def update_by_user_id(user_id: int, current_step: str = None, completed_steps: str = None,
+                         is_completed: bool = None, is_skipped: bool = None) -> bool:
+        """通过用户ID更新引导信息"""
+        # 构建动态更新语句
+        update_fields = []
+        params = []
+        
+        if current_step is not None:
+            update_fields.append("current_step = ?")
+            params.append(current_step)
+        
+        if completed_steps is not None:
+            update_fields.append("completed_steps = ?")
+            params.append(completed_steps)
+        
+        if is_completed is not None:
+            update_fields.append("is_completed = ?")
+            params.append(is_completed)
+        
+        if is_skipped is not None:
+            update_fields.append("is_skipped = ?")
+            params.append(is_skipped)
+        
+        if not update_fields:
+            return False
+        
+        # 添加更新时间和用户ID参数
+        update_fields.append("updated_at = ?")
+        params.append(datetime.now())
+        params.append(user_id)
+        
+        query = f"UPDATE user_guides SET {', '.join(update_fields)} WHERE user_id = ?"
+        
+        rows_affected = execute_update(query, tuple(params))
+        return rows_affected > 0
+    
+    @staticmethod
+    def get_users_by_step(step: str) -> List[UserGuide]:
+        """获取特定步骤的用户"""
+        query = "SELECT * FROM user_guides WHERE current_step = ? AND is_completed = 0 AND is_skipped = 0"
+        results = execute_query(query, (step,))
+        return [UserGuide.from_dict(row) for row in results]
+    
+    @staticmethod
+    def get_incomplete_guides(limit: int = 50) -> List[UserGuide]:
+        """获取未完成引导的用户"""
+        query = """
+        SELECT * FROM user_guides
+        WHERE is_completed = 0 AND is_skipped = 0
+        ORDER BY created_at DESC
+        LIMIT ?
+        """
+        results = execute_query(query, (limit,))
+        return [UserGuide.from_dict(row) for row in results]

@@ -49,6 +49,14 @@ def main():
         settings_handler = CommandHandlers.get_settings_conversation_handler()
         application.add_handler(settings_handler)
         
+        # 注册引导对话处理器
+        guide_handler = CommandHandlers.get_guide_conversation_handler()
+        application.add_handler(guide_handler)
+        
+        # 注册配置选择回调查询处理器
+        config_choice_handler = MessageHandlers.get_config_choice_callback_handler()
+        application.add_handler(config_choice_handler)
+        
         # 注册消息处理器
         message_handler = MessageHandlers.get_message_handler()
         application.add_handler(message_handler)

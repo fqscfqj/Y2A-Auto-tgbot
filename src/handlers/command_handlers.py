@@ -8,6 +8,7 @@ from src.managers.user_manager import UserManager
 from src.managers.admin_manager import AdminManager
 from src.managers.settings_manager import SettingsManager
 from src.managers.forward_manager import ForwardManager
+from src.managers.guide_manager import GuideManager
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +43,49 @@ class CommandHandlers:
         """处理/start命令"""
         user = await UserManager.ensure_user_registered(update, context)
         
-        welcome_text = f"""
-👋 欢迎使用Y2A-Auto Telegram Bot，{user.first_name}！
-
-本机器人可以帮助您将YouTube链接自动转发到您配置的Y2A-Auto服务。
-
-🚀 快速开始：
-1. 使用 /settings 命令配置您的Y2A-Auto服务
-2. 配置完成后，直接发送YouTube链接即可自动转发
-
-💡 提示：输入 /help 查看所有可用命令
-"""
+        # 检查用户引导状态
+        guide = UserManager.get_user_guide(user.id)
         
-        await update.message.reply_text(welcome_text)
+        if not guide:
+            # 新用户，创建引导记录并开始引导
+            guide = UserManager.ensure_user_guide(user.id)
+            await GuideManager.start_guide(update, context)
+            return
+        elif guide.is_completed:
+            # 已完成引导的用户
+            from src.database.repository import UserStatsRepository
+            user_stats = UserStatsRepository.get_by_user_id(user.id)
+            
+            welcome_text = f"""
+👋 欢迎回来，{user.first_name}！
+
+您已经完成了引导配置，可以直接发送YouTube链接进行转发。
+
+📊 您的统计信息：
+• 总转发次数：{user_stats.total_forwards if user_stats else 0}
+• 成功率：{user_stats.success_rate:.1f if user_stats else 0}%
+
+🔧 其他命令：
+• /settings - 修改配置
+• /help - 查看帮助
+"""
+            await update.message.reply_text(welcome_text)
+        elif guide.is_skipped:
+            # 跳过引导的用户
+            welcome_text = f"""
+👋 欢迎回来，{user.first_name}！
+
+您之前跳过了引导流程。您可以选择：
+
+🚀 选项：
+• /start - 重新开始引导流程
+• /settings - 直接进行配置
+• /help - 查看帮助信息
+"""
+            await update.message.reply_text(welcome_text)
+        else:
+            # 未完成引导的用户，继续引导
+            await GuideManager._continue_guide(update, context, user, guide)
     
     @staticmethod
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -147,3 +178,8 @@ class CommandHandlers:
     def get_settings_conversation_handler():
         """获取设置菜单的对话处理器"""
         return SettingsManager.get_conversation_handler()
+    
+    @staticmethod
+    def get_guide_conversation_handler():
+        """获取引导菜单的对话处理器"""
+        return GuideManager.get_conversation_handler()

@@ -5,8 +5,8 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.database.models import User, UserConfig
-from src.database.repository import UserRepository, UserConfigRepository
+from src.database.models import User, UserConfig, UserGuide, GuideStep
+from src.database.repository import UserRepository, UserConfigRepository, UserGuideRepository
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +14,20 @@ class UserManager:
     """用户管理器，负责用户注册、配置管理等功能"""
     
     @staticmethod
-    def register_user(telegram_user: Dict[str, Any]) -> User:
+    def register_user(telegram_user) -> User:
         """注册新用户或获取现有用户"""
-        telegram_id = telegram_user.id
-        username = telegram_user.username
-        first_name = telegram_user.first_name
-        last_name = telegram_user.last_name
+        # 检查是否是字典（来自上下文）还是Telegram User对象
+        if isinstance(telegram_user, dict):
+            telegram_id = telegram_user.get('id')
+            username = telegram_user.get('username')
+            first_name = telegram_user.get('first_name')
+            last_name = telegram_user.get('last_name')
+        else:
+            # Telegram User对象
+            telegram_id = telegram_user.id
+            username = telegram_user.username
+            first_name = telegram_user.first_name
+            last_name = telegram_user.last_name
         
         # 检查用户是否已存在
         user = UserRepository.get_by_telegram_id(telegram_id)
@@ -120,12 +128,7 @@ class UserManager:
     async def ensure_user_registered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> User:
         """确保用户已注册，如果未注册则自动注册"""
         telegram_user = update.effective_user
-        user = UserManager.register_user({
-            'id': telegram_user.id,
-            'username': telegram_user.username,
-            'first_name': telegram_user.first_name,
-            'last_name': telegram_user.last_name
-        })
+        user = UserManager.register_user(telegram_user)
         
         # 更新用户活动时间
         UserManager.update_user_activity(telegram_user.id)
@@ -151,3 +154,117 @@ class UserManager:
             info += "\nY2A-Auto配置: 未配置"
         
         return info
+    
+    @staticmethod
+    def get_user_guide(user_id: int) -> Optional[UserGuide]:
+        """获取用户引导信息"""
+        return UserGuideRepository.get_by_user_id(user_id)
+    
+    @staticmethod
+    def create_user_guide(user_id: int) -> UserGuide:
+        """创建用户引导记录"""
+        guide = UserGuide(
+            user_id=user_id,
+            current_step=GuideStep.WELCOME.value,
+            completed_steps="[]",
+            is_completed=False,
+            is_skipped=False,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        guide_id = UserGuideRepository.create(guide)
+        guide.id = guide_id
+        return guide
+    
+    @staticmethod
+    def update_user_guide(guide: UserGuide) -> bool:
+        """更新用户引导信息"""
+        return UserGuideRepository.update(guide)
+    
+    @staticmethod
+    def is_guide_completed(user_id: int) -> bool:
+        """检查用户是否已完成引导"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        return guide is not None and guide.is_completed
+    
+    @staticmethod
+    def is_guide_skipped(user_id: int) -> bool:
+        """检查用户是否跳过了引导"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        return guide is not None and guide.is_skipped
+    
+    @staticmethod
+    def get_current_guide_step(user_id: int) -> Optional[str]:
+        """获取用户当前引导步骤"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        if guide:
+            return guide.current_step
+        return None
+    
+    @staticmethod
+    def ensure_user_guide(user_id: int) -> UserGuide:
+        """确保用户有引导记录，如果没有则创建"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        if not guide:
+            guide = UserManager.create_user_guide(user_id)
+        return guide
+    
+    @staticmethod
+    def mark_guide_step_completed(user_id: int, step: str) -> bool:
+        """标记引导步骤为已完成"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        if not guide:
+            return False
+        
+        guide.mark_step_completed(step)
+        return UserGuideRepository.update(guide)
+    
+    @staticmethod
+    def advance_guide_step(user_id: int) -> Optional[str]:
+        """推进引导步骤到下一步"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        if not guide:
+            return None
+        
+        # 标记当前步骤为已完成
+        guide.mark_step_completed(guide.current_step)
+        
+        # 获取下一步骤
+        next_step = guide.get_next_step()
+        if next_step:
+            guide.current_step = next_step
+            UserGuideRepository.update(guide)
+            return next_step
+        elif not guide.is_completed:
+            # 如果没有下一步骤且未完成，则标记为完成
+            guide.is_completed = True
+            guide.current_step = GuideStep.COMPLETED.value
+            UserGuideRepository.update(guide)
+            return GuideStep.COMPLETED.value
+        
+        return None
+    
+    @staticmethod
+    def skip_user_guide(user_id: int) -> bool:
+        """跳过用户引导"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        if not guide:
+            return False
+        
+        guide.is_skipped = True
+        guide.updated_at = datetime.now()
+        return UserGuideRepository.update(guide)
+    
+    @staticmethod
+    def reset_user_guide(user_id: int) -> bool:
+        """重置用户引导"""
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        if not guide:
+            return False
+        
+        guide.current_step = GuideStep.WELCOME.value
+        guide.completed_steps = "[]"
+        guide.is_completed = False
+        guide.is_skipped = False
+        guide.updated_at = datetime.now()
+        return UserGuideRepository.update(guide)

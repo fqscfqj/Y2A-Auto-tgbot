@@ -25,8 +25,22 @@ class MessageHandlers:
         return MessageHandler(filters.TEXT & ~filters.COMMAND, MessageHandlers.handle_text_message)
     
     @staticmethod
-    def get_config_choice_callback_handler():
-        """获取配置选择回调查询处理器"""
-        from telegram.ext import CallbackQueryHandler
+    def get_help_command_handler():
+        """获取帮助命令处理器"""
+        from telegram.ext import CommandHandler
         from src.managers.forward_manager import ForwardManager
-        return CallbackQueryHandler(ForwardManager.handle_config_choice_callback)
+        return CommandHandler("help", ForwardManager.handle_help_command)
+    
+    @staticmethod
+    def get_start_guide_command_handler():
+        """获取开始引导命令处理器"""
+        from telegram.ext import CommandHandler
+        from src.managers.forward_manager import ForwardManager
+        return CommandHandler("start_guide", ForwardManager.handle_start_guide_command)
+    
+    @staticmethod
+    def get_direct_config_command_handler():
+        """获取直接配置命令处理器"""
+        from telegram.ext import CommandHandler
+        from src.managers.forward_manager import ForwardManager
+        return CommandHandler("direct_config", ForwardManager.handle_direct_config_command)

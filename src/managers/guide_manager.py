@@ -102,18 +102,14 @@ class GuideManager:
 🚀 接下来我将引导您完成简单的配置，只需几分钟时间！
 
 💡 提示：您可以随时输入 /skip 跳过引导，或输入 /cancel 取消。
+
+请输入 /continue 继续引导，或输入 /skip 跳过引导。
 """
         
-        keyboard = [
-            [InlineKeyboardButton("开始引导", callback_data="next_step")],
-            [InlineKeyboardButton("跳过引导", callback_data="skip_guide")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         if update.callback_query:
-            await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup)
+            await update.callback_query.edit_message_text(welcome_text)
         else:
-            await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+            await update.message.reply_text(welcome_text)
         
         return GuideState.WELCOME
     
@@ -136,18 +132,14 @@ class GuideManager:
 4. 发送YouTube链接即可自动转发
 
 准备好了吗？让我们开始配置吧！
+
+请输入 /continue 继续下一步，或输入 /skip 跳过引导。
 """
         
-        keyboard = [
-            [InlineKeyboardButton("下一步", callback_data="next_step")],
-            [InlineKeyboardButton("跳过引导", callback_data="skip_guide")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         if update.callback_query:
-            await update.callback_query.edit_message_text(intro_text, reply_markup=reply_markup)
+            await update.callback_query.edit_message_text(intro_text)
         else:
-            await update.message.reply_text(intro_text, reply_markup=reply_markup)
+            await update.message.reply_text(intro_text)
         
         return GuideState.INTRO_FEATURES
     
@@ -163,18 +155,13 @@ class GuideManager:
 
 💡 提示：这是您部署Y2A-Auto服务的地址，通常以 /tasks/add_via_extension 结尾。
 
-请输入API地址：
+请输入API地址，或输入 /skip 跳过此步骤：
 """
         
-        keyboard = [
-            [InlineKeyboardButton("跳过此步骤", callback_data="skip_step")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         if update.callback_query:
-            await update.callback_query.edit_message_text(config_text, reply_markup=reply_markup)
+            await update.callback_query.edit_message_text(config_text)
         else:
-            await update.message.reply_text(config_text, reply_markup=reply_markup)
+            await update.message.reply_text(config_text)
         
         return GuideState.CONFIG_API
     
@@ -185,20 +172,15 @@ class GuideManager:
 🔐 配置Y2A-Auto密码（可选）
 
 如果您的Y2A-Auto服务设置了访问密码，请在此输入。
-如果没有设置密码，可以直接点击"跳过此步骤"。
+如果没有设置密码，可以直接输入 /skip 跳过此步骤。
 
 请输入密码：
 """
         
-        keyboard = [
-            [InlineKeyboardButton("跳过此步骤", callback_data="skip_step")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         if update.callback_query:
-            await update.callback_query.edit_message_text(password_text, reply_markup=reply_markup)
+            await update.callback_query.edit_message_text(password_text)
         else:
-            await update.message.reply_text(password_text, reply_markup=reply_markup)
+            await update.message.reply_text(password_text)
         
         return GuideState.CONFIG_PASSWORD
     
@@ -228,18 +210,14 @@ class GuideManager:
 {result}
 
 如果连接失败，请检查您的配置是否正确，或使用 /settings 命令重新配置。
+
+请输入 /continue 继续下一步，或输入 /reconfig 重新配置。
 """
         
-        keyboard = [
-            [InlineKeyboardButton("下一步", callback_data="next_step")],
-            [InlineKeyboardButton("重新配置", callback_data="reconfig")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         if update.callback_query:
-            await update.callback_query.edit_message_text(test_text, reply_markup=reply_markup)
+            await update.callback_query.edit_message_text(test_text)
         else:
-            await update.message.reply_text(test_text, reply_markup=reply_markup)
+            await update.message.reply_text(test_text)
         
         return GuideState.TEST_CONNECTION
     
@@ -251,21 +229,17 @@ class GuideManager:
 
 现在您可以发送YouTube链接进行转发了！让我为您演示一下：
 
-请点击下面的按钮发送示例链接，或者您也可以自己发送一个YouTube链接。
+请输入 /send_example 发送示例链接，或者您也可以自己发送一个YouTube链接。
 
 示例链接：{GuideManager.EXAMPLE_YOUTUBE_URL}
+
+请输入 /send_example 发送示例链接，或输入 /complete 完成引导。
 """
         
-        keyboard = [
-            [InlineKeyboardButton("发送示例链接", callback_data="send_example")],
-            [InlineKeyboardButton("完成引导", callback_data="complete_guide")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         if update.callback_query:
-            await update.callback_query.edit_message_text(example_text, reply_markup=reply_markup)
+            await update.callback_query.edit_message_text(example_text)
         else:
-            await update.message.reply_text(example_text, reply_markup=reply_markup)
+            await update.message.reply_text(example_text)
         
         return GuideState.SEND_EXAMPLE
     
@@ -504,6 +478,94 @@ class GuideManager:
         return ConversationHandler.END
     
     @staticmethod
+    async def continue_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """继续引导下一步"""
+        user = await UserManager.ensure_user_registered(update, context)
+        guide = UserGuideRepository.get_by_user_id(user.id)
+        
+        if not guide:
+            await update.message.reply_text("❌ 引导记录不存在，请使用 /start 重新开始")
+            return ConversationHandler.END
+        
+        # 标记当前步骤为已完成
+        guide.mark_step_completed(guide.current_step)
+        
+        # 获取下一步骤
+        next_step = guide.get_next_step()
+        if next_step:
+            guide.current_step = next_step
+            UserGuideRepository.update(guide)
+            return await GuideManager._continue_guide(update, context, user, guide)
+        else:
+            return await GuideManager._complete_guide(update, context, user, guide)
+    
+    @staticmethod
+    async def reconfig_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """重新配置"""
+        user = await UserManager.ensure_user_registered(update, context)
+        guide = UserGuideRepository.get_by_user_id(user.id)
+        
+        if not guide:
+            await update.message.reply_text("❌ 引导记录不存在，请使用 /start 重新开始")
+            return ConversationHandler.END
+        
+        # 重新配置
+        guide.current_step = GuideStep.CONFIG_API.value
+        UserGuideRepository.update(guide)
+        
+        return await GuideManager._config_api(update, context, user, guide)
+    
+    @staticmethod
+    async def send_example_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """发送示例链接"""
+        user = await UserManager.ensure_user_registered(update, context)
+        guide = UserGuideRepository.get_by_user_id(user.id)
+        
+        if not guide:
+            await update.message.reply_text("❌ 引导记录不存在，请使用 /start 重新开始")
+            return ConversationHandler.END
+        
+        # 发送示例链接
+        from src.managers.forward_manager import ForwardManager
+        
+        # 模拟用户发送消息
+        context.user_data['example_sent'] = True
+        await ForwardManager.forward_youtube_url(update, context, GuideManager.EXAMPLE_YOUTUBE_URL)
+        
+        # 等待一段时间后显示完成消息
+        import asyncio
+        await asyncio.sleep(2)
+        
+        complete_text = """
+✅ 示例链接已发送！
+
+现在您已经了解了如何使用本机器人。直接发送YouTube链接即可自动转发。
+
+🎉 引导流程已完成！感谢您的使用。
+"""
+        await update.message.reply_text(complete_text)
+        
+        # 更新引导状态为已完成
+        guide.is_completed = True
+        guide.current_step = GuideStep.COMPLETED.value
+        guide.updated_at = datetime.now()
+        UserGuideRepository.update(guide)
+        
+        return ConversationHandler.END
+    
+    @staticmethod
+    async def complete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """直接完成引导"""
+        user = await UserManager.ensure_user_registered(update, context)
+        guide = UserGuideRepository.get_by_user_id(user.id)
+        
+        if not guide:
+            await update.message.reply_text("❌ 引导记录不存在，请使用 /start 重新开始")
+            return ConversationHandler.END
+        
+        return await GuideManager._complete_guide(update, context, user, guide)
+    
+    @staticmethod
     async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """取消引导"""
         await update.message.reply_text("引导已取消。您可以使用 /start 重新开始引导。")
@@ -516,27 +578,37 @@ class GuideManager:
             entry_points=[CommandHandler("start", GuideManager.start_guide)],
             states={
                 GuideState.WELCOME: [
-                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(next_step|skip_guide|restart_guide|cancel_guide)$")
+                    CommandHandler("continue", GuideManager.continue_command),
+                    CommandHandler("skip", GuideManager.skip_command),
+                    CommandHandler("cancel", GuideManager.cancel_command)
                 ],
                 GuideState.INTRO_FEATURES: [
-                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(next_step|skip_guide)$")
+                    CommandHandler("continue", GuideManager.continue_command),
+                    CommandHandler("skip", GuideManager.skip_command),
+                    CommandHandler("cancel", GuideManager.cancel_command)
                 ],
                 GuideState.CONFIG_API: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, GuideManager.handle_api_input),
-                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^skip_step$")
+                    CommandHandler("skip", GuideManager.skip_command),
+                    CommandHandler("cancel", GuideManager.cancel_command)
                 ],
                 GuideState.CONFIG_PASSWORD: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, GuideManager.handle_password_input),
-                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^skip_step$")
+                    CommandHandler("skip", GuideManager.skip_command),
+                    CommandHandler("cancel", GuideManager.cancel_command)
                 ],
                 GuideState.TEST_CONNECTION: [
-                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(next_step|reconfig)$")
+                    CommandHandler("continue", GuideManager.continue_command),
+                    CommandHandler("reconfig", GuideManager.reconfig_command),
+                    CommandHandler("cancel", GuideManager.cancel_command)
                 ],
                 GuideState.SEND_EXAMPLE: [
-                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(send_example|complete_guide)$")
+                    CommandHandler("send_example", GuideManager.send_example_command),
+                    CommandHandler("complete", GuideManager.complete_command),
+                    CommandHandler("cancel", GuideManager.cancel_command)
                 ],
                 GuideState.COMPLETED: [
-                    CallbackQueryHandler(GuideManager.guide_callback)
+                    CommandHandler("cancel", GuideManager.cancel_command)
                 ]
             },
             fallbacks=[

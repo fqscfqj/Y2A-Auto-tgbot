@@ -27,20 +27,21 @@ class SettingsManager:
         """处理/settings命令，显示设置菜单"""
         user = await UserManager.ensure_user_registered(update, context)
         
-        keyboard = [
-            [InlineKeyboardButton("查看当前配置", callback_data="view_config")],
-            [InlineKeyboardButton("设置Y2A-Auto API地址", callback_data="set_api_url")],
-            [InlineKeyboardButton("设置Y2A-Auto密码", callback_data="set_password")],
-            [InlineKeyboardButton("测试连接", callback_data="test_connection")],
-            [InlineKeyboardButton("删除配置", callback_data="delete_config")],
-            [InlineKeyboardButton("返回", callback_data="back")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        settings_text = """
+⚙️ 设置菜单
+
+请使用以下命令进行设置：
+• /view_config - 查看当前配置
+• /set_api - 设置Y2A-Auto API地址
+• /set_password - 设置Y2A-Auto密码
+• /test_connection - 测试连接
+• /delete_config - 删除配置
+• /cancel - 取消设置
+
+请输入您要执行的命令：
+"""
         
-        await update.message.reply_text(
-            "⚙️ 设置菜单\n\n请选择要进行的操作:",
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text(settings_text)
         
         return SettingsState.MAIN_MENU
     
@@ -72,7 +73,6 @@ class SettingsManager:
     @staticmethod
     async def _view_config(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
         """查看当前配置"""
-        query = update.callback_query
         config = UserManager.get_user_config(user.id)
         
         if config:
@@ -84,21 +84,16 @@ class SettingsManager:
         else:
             config_text = "您尚未配置Y2A-Auto服务"
         
-        keyboard = [[InlineKeyboardButton("返回", callback_data="back")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        config_text += "\n\n输入 /cancel 返回设置菜单。"
         
-        await query.edit_message_text(
-            config_text,
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text(config_text)
         
         return SettingsState.MAIN_MENU
     
     @staticmethod
     async def _set_api_url_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """开始设置API地址"""
-        query = update.callback_query
-        await query.edit_message_text(
+        await update.message.reply_text(
             "请输入Y2A-Auto的API地址:\n\n"
             "例如: http://localhost:5000/tasks/add_via_extension\n\n"
             "输入 /cancel 取消设置"
@@ -138,8 +133,7 @@ class SettingsManager:
     @staticmethod
     async def _set_password_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """开始设置密码"""
-        query = update.callback_query
-        await query.edit_message_text(
+        await update.message.reply_text(
             "请输入Y2A-Auto的密码（如果不需要密码请输入 /skip）:\n\n"
             "输入 /cancel 取消设置"
         )
@@ -171,18 +165,18 @@ class SettingsManager:
     @staticmethod
     async def _test_connection(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
         """测试连接"""
-        query = update.callback_query
         config = UserManager.get_user_config(user.id)
         
         if not config:
-            await query.edit_message_text("❌ 您尚未配置Y2A-Auto服务")
+            await update.message.reply_text("❌ 您尚未配置Y2A-Auto服务")
             return SettingsState.MAIN_MENU
         
         # 这里应该实现实际的连接测试逻辑
         # 暂时只显示测试信息
-        await query.edit_message_text(
+        await update.message.reply_text(
             f"🔄 正在测试连接到: {config.y2a_api_url}\n\n"
-            "连接测试功能将在后续版本中实现"
+            "连接测试功能将在后续版本中实现\n\n"
+            "输入 /cancel 返回设置菜单。"
         )
         
         return SettingsState.MAIN_MENU
@@ -190,18 +184,10 @@ class SettingsManager:
     @staticmethod
     async def _delete_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """开始删除配置"""
-        query = update.callback_query
-        
-        keyboard = [
-            [InlineKeyboardButton("确认删除", callback_data="confirm_delete")],
-            [InlineKeyboardButton("取消", callback_data="back")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
+        await update.message.reply_text(
             "⚠️ 确定要删除Y2A-Auto配置吗？\n\n"
-            "删除后您将无法使用转发功能，除非重新配置",
-            reply_markup=reply_markup
+            "删除后您将无法使用转发功能，除非重新配置\n\n"
+            "输入 /confirm_delete 确认删除，或输入 /cancel 取消"
         )
         
         return SettingsState.DELETE_CONFIG
@@ -209,17 +195,43 @@ class SettingsManager:
     @staticmethod
     async def _delete_config_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """确认删除配置"""
-        query = update.callback_query
         user = await UserManager.ensure_user_registered(update, context)
         
         success = UserManager.delete_user_config(user.id)
         
         if success:
-            await query.edit_message_text("✅ 配置已删除")
+            await update.message.reply_text("✅ 配置已删除")
         else:
-            await query.edit_message_text("❌ 删除配置失败")
+            await update.message.reply_text("❌ 删除配置失败")
         
         return ConversationHandler.END
+    
+    @staticmethod
+    async def view_config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """查看配置命令"""
+        user = await UserManager.ensure_user_registered(update, context)
+        return await SettingsManager._view_config(update, context, user)
+    
+    @staticmethod
+    async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """设置API地址命令"""
+        return await SettingsManager._set_api_url_start(update, context)
+    
+    @staticmethod
+    async def set_password_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """设置密码命令"""
+        return await SettingsManager._set_password_start(update, context)
+    
+    @staticmethod
+    async def test_connection_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """测试连接命令"""
+        user = await UserManager.ensure_user_registered(update, context)
+        return await SettingsManager._test_connection(update, context, user)
+    
+    @staticmethod
+    async def delete_config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """删除配置命令"""
+        return await SettingsManager._delete_config_start(update, context)
     
     @staticmethod
     async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -255,7 +267,12 @@ class SettingsManager:
             entry_points=[CommandHandler("settings", SettingsManager.settings_command)],
             states={
                 SettingsState.MAIN_MENU: [
-                    CallbackQueryHandler(SettingsManager.settings_callback, pattern="^(view_config|set_api_url|set_password|test_connection|delete_config|back)$")
+                    CommandHandler("view_config", SettingsManager.view_config_command),
+                    CommandHandler("set_api", SettingsManager.set_api_command),
+                    CommandHandler("set_password", SettingsManager.set_password_command),
+                    CommandHandler("test_connection", SettingsManager.test_connection_command),
+                    CommandHandler("delete_config", SettingsManager.delete_config_command),
+                    CommandHandler("cancel", SettingsManager.cancel_command)
                 ],
                 SettingsState.SET_API_URL: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, SettingsManager._set_api_url_end),
@@ -267,8 +284,8 @@ class SettingsManager:
                     CommandHandler("cancel", SettingsManager.cancel_command)
                 ],
                 SettingsState.DELETE_CONFIG: [
-                    CallbackQueryHandler(SettingsManager._delete_config_confirm, pattern="^confirm_delete$"),
-                    CallbackQueryHandler(SettingsManager.settings_callback, pattern="^back$")
+                    CommandHandler("confirm_delete", SettingsManager._delete_config_confirm),
+                    CommandHandler("cancel", SettingsManager.cancel_command)
                 ]
             },
             fallbacks=[CommandHandler("cancel", SettingsManager.cancel_command)],

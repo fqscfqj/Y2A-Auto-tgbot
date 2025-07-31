@@ -77,15 +77,11 @@ class ForwardManager:
                 )
             else:
                 # 用户未开始引导或已跳过引导
-                keyboard = [
-                    [InlineKeyboardButton("开始引导配置", callback_data="start_guide")],
-                    [InlineKeyboardButton("直接配置", callback_data="direct_config")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
                 await update.message.reply_text(
-                    "您尚未配置Y2A-Auto服务。请选择配置方式：",
-                    reply_markup=reply_markup
+                    "您尚未配置Y2A-Auto服务。请使用以下命令进行配置：\n\n"
+                    "• /start - 开始引导配置\n"
+                    "• /settings - 直接配置\n\n"
+                    "请输入您选择的命令："
                 )
             return
         
@@ -196,17 +192,13 @@ class ForwardManager:
                 )
             else:
                 # 提供命令提示
-                keyboard = [
-                    [InlineKeyboardButton("查看帮助", callback_data="show_help")],
-                    [InlineKeyboardButton("开始引导", callback_data="start_guide")],
-                    [InlineKeyboardButton("直接配置", callback_data="direct_config")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
                 await update.message.reply_text(
                     '请发送有效的YouTube视频或播放列表链接。\n\n'
-                    '🤖 您可以尝试以下操作：',
-                    reply_markup=reply_markup
+                    '🤖 您可以尝试以下操作：\n'
+                    '• /help - 查看帮助\n'
+                    '• /start - 开始引导\n'
+                    '• /settings - 直接配置\n\n'
+                    '请输入您选择的命令：'
                 )
     
     @staticmethod
@@ -240,24 +232,21 @@ class ForwardManager:
             return f"❌ 连接失败：{e}"
     
     @staticmethod
-    async def handle_config_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """处理配置选择的回调查询"""
-        query = update.callback_query
-        await query.answer()
-        
+    async def handle_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """处理帮助命令"""
+        from src.handlers.command_handlers import CommandHandlers
+        await CommandHandlers.help_command(update, context)
+    
+    @staticmethod
+    async def handle_start_guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """处理开始引导命令"""
+        from src.managers.guide_manager import GuideManager
         user = await UserManager.ensure_user_registered(update, context)
-        action = query.data
-        
-        if action == "show_help":
-            # 显示帮助信息
-            from src.handlers.command_handlers import CommandHandlers
-            await CommandHandlers.help_command(update, context)
-        elif action == "start_guide":
-            # 开始引导流程
-            from src.managers.guide_manager import GuideManager
-            guide = UserManager.ensure_user_guide(user.id)
-            await GuideManager._continue_guide(update, context, user, guide)
-        elif action == "direct_config":
-            # 直接配置
-            from src.managers.settings_manager import SettingsManager
-            await SettingsManager.settings_command(update, context)
+        guide = UserManager.ensure_user_guide(user.id)
+        await GuideManager._continue_guide(update, context, user, guide)
+    
+    @staticmethod
+    async def handle_direct_config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """处理直接配置命令"""
+        from src.managers.settings_manager import SettingsManager
+        await SettingsManager.settings_command(update, context)

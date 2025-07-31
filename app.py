@@ -57,9 +57,17 @@ def main():
         guide_handler = CommandHandlers.get_guide_conversation_handler()
         application.add_handler(guide_handler)
         
-        # 注册配置选择回调查询处理器
-        config_choice_handler = MessageHandlers.get_config_choice_callback_handler()
-        application.add_handler(config_choice_handler)
+        # 注册帮助命令处理器
+        help_handler = MessageHandlers.get_help_command_handler()
+        application.add_handler(help_handler)
+        
+        # 注册开始引导命令处理器
+        start_guide_handler = MessageHandlers.get_start_guide_command_handler()
+        application.add_handler(start_guide_handler)
+        
+        # 注册直接配置命令处理器
+        direct_config_handler = MessageHandlers.get_direct_config_command_handler()
+        application.add_handler(direct_config_handler)
         
         # 注册消息处理器
         message_handler = MessageHandlers.get_message_handler()

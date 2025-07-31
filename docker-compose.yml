@@ -1,11 +1,27 @@
 version: '3.8'
+
 services:
-  y2a_auto_tg_bot:
-    image: ghcr.io/fqscfqj/y2a-auto-tgbot:latest
+  y2a-auto-tgbot:
+    build: .
     container_name: y2a-auto-tgbot
-    environment:
-      - TG_BOT_TOKEN=你的TelegramBotToken
-      - Y2A_AUTO_API=http://host.docker.internal:5000
-      # 如启用密码保护，取消注释并填写：
-      # - Y2A_PASSWORD=你的密码
     restart: unless-stopped
+    environment:
+      # Telegram Bot Token (必需)
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN}
+      
+      # 管理员Telegram用户ID列表 (可选，多个ID用逗号分隔)
+      - ADMIN_TELEGRAM_IDS=${ADMIN_TELEGRAM_IDS}
+      
+      # 日志级别 (可选，默认为INFO)
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      # 持久化数据目录
+      - ./data:/app/data
+      # 持久化日志目录
+      - ./logs:/app/logs
+    networks:
+      - y2a-network
+
+networks:
+  y2a-network:
+    driver: bridge

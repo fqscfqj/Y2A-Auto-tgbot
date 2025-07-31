@@ -15,6 +15,7 @@ sys.path.insert(0, str(project_root))
 from telegram.ext import Application, CommandHandler, ConversationHandler
 from config import Config
 from src.database.db import init_database
+from src.database.migration_manager import MigrationManager
 from src.handlers.command_handlers import CommandHandlers
 from src.handlers.message_handlers import MessageHandlers
 
@@ -33,6 +34,14 @@ def main():
         logger.info("初始化数据库...")
         init_database()
         logger.info("数据库初始化完成")
+        
+        # 运行数据库迁移
+        logger.info("运行数据库迁移...")
+        if MigrationManager.run_pending_migrations():
+            logger.info("数据库迁移完成")
+        else:
+            logger.error("数据库迁移失败")
+            sys.exit(1)
         
         # 创建Telegram应用
         logger.info("创建Telegram应用...")

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   y2a-auto-tgbot:
-    build: .
+    image: ghcr.io/fqscfqj/y2a-auto-tgbot:latest
     container_name: y2a-auto-tgbot
     restart: unless-stopped
     environment:

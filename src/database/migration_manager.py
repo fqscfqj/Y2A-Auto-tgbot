@@ -21,7 +21,8 @@ class MigrationManager:
         migration_files = []
         
         for file in migrations_dir.glob("*.py"):
-            if file.name.startswith("__"):
+            # 只处理以数字开头的迁移文件（如 001_initial.py, 002_add_user_guides.py）
+            if file.name.startswith("__") or not file.name[0].isdigit():
                 continue
             migration_files.append(file.stem)
         

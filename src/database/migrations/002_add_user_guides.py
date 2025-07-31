@@ -1,42 +1,10 @@
 """
 添加用户引导表的数据库迁移脚本
 """
-import os
-import sys
 import logging
-import sqlite3
-from pathlib import Path
-
-# 数据库路径
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'app.db')
-
-# 确保数据目录存在
-data_dir = os.path.dirname(DB_PATH)
-if not os.path.exists(data_dir):
-    os.makedirs(data_dir)
+from src.database.db import execute_script
 
 logger = logging.getLogger(__name__)
-
-def get_db_connection():
-    """获取数据库连接"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # 返回字典形式的行
-    return conn
-
-def execute_script(script):
-    """执行SQL脚本"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.executescript(script)
-        conn.commit()
-    except sqlite3.Error as e:
-        logger.error(f"脚本执行失败: {e}")
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
 def run_migration():
     """运行数据库迁移"""
@@ -73,6 +41,7 @@ def run_migration():
         VALUES ('002_add_user_guides', '添加用户引导表，用于跟踪用户引导进度');
         """
         
+        logger.info("执行SQL脚本创建user_guides表...")
         execute_script(migration_sql)
         
         logger.info("用户引导表迁移完成")

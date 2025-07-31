@@ -30,12 +30,7 @@ def main():
             logger.error("配置验证失败，请检查环境变量")
             sys.exit(1)
         
-        # 初始化数据库
-        logger.info("初始化数据库...")
-        init_database()
-        logger.info("数据库初始化完成")
-        
-        # 运行数据库迁移
+        # 运行数据库迁移（包括初始化）
         logger.info("运行数据库迁移...")
         if MigrationManager.run_pending_migrations():
             logger.info("数据库迁移完成")

@@ -17,17 +17,21 @@ class MigrationManager:
     @staticmethod
     def get_migration_files() -> List[str]:
         """获取所有迁移文件"""
-        migrations_dir = Path(__file__).parent
+        migrations_dir = Path(__file__).parent / "migrations"
         migration_files = []
+        
+        logger.info(f"搜索迁移文件的目录: {migrations_dir}")
         
         for file in migrations_dir.glob("*.py"):
             # 只处理以数字开头的迁移文件（如 001_initial.py, 002_add_user_guides.py）
             if file.name.startswith("__") or not file.name[0].isdigit():
                 continue
             migration_files.append(file.stem)
+            logger.info(f"找到迁移文件: {file.name}")
         
         # 按文件名排序，确保迁移按正确顺序执行
         migration_files.sort()
+        logger.info(f"找到的迁移文件: {migration_files}")
         return migration_files
     
     @staticmethod
@@ -37,11 +41,14 @@ class MigrationManager:
             # 检查schema_migrations表是否存在
             tables = execute_query("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'")
             if not tables:
+                logger.info("schema_migrations表不存在，返回空列表")
                 return []
             
             # 获取已执行的迁移
             migrations = execute_query("SELECT version FROM schema_migrations ORDER BY version")
-            return [migration['version'] for migration in migrations]
+            executed_migrations = [migration['version'] for migration in migrations]
+            logger.info(f"已执行的迁移: {executed_migrations}")
+            return executed_migrations
         except Exception as e:
             logger.error(f"获取已执行迁移失败: {e}")
             return []

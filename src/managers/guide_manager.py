@@ -516,24 +516,24 @@ class GuideManager:
             entry_points=[CommandHandler("start", GuideManager.start_guide)],
             states={
                 GuideState.WELCOME: [
-                    CallbackQueryHandler(GuideManager.guide_callback)
+                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(next_step|skip_guide|restart_guide|cancel_guide)$")
                 ],
                 GuideState.INTRO_FEATURES: [
-                    CallbackQueryHandler(GuideManager.guide_callback)
+                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(next_step|skip_guide)$")
                 ],
                 GuideState.CONFIG_API: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, GuideManager.handle_api_input),
-                    CallbackQueryHandler(GuideManager.guide_callback)
+                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^skip_step$")
                 ],
                 GuideState.CONFIG_PASSWORD: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, GuideManager.handle_password_input),
-                    CallbackQueryHandler(GuideManager.guide_callback)
+                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^skip_step$")
                 ],
                 GuideState.TEST_CONNECTION: [
-                    CallbackQueryHandler(GuideManager.guide_callback)
+                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(next_step|reconfig)$")
                 ],
                 GuideState.SEND_EXAMPLE: [
-                    CallbackQueryHandler(GuideManager.guide_callback)
+                    CallbackQueryHandler(GuideManager.guide_callback, pattern="^(send_example|complete_guide)$")
                 ],
                 GuideState.COMPLETED: [
                     CallbackQueryHandler(GuideManager.guide_callback)

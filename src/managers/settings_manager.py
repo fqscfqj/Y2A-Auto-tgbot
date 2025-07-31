@@ -255,7 +255,7 @@ class SettingsManager:
             entry_points=[CommandHandler("settings", SettingsManager.settings_command)],
             states={
                 SettingsState.MAIN_MENU: [
-                    CallbackQueryHandler(SettingsManager.settings_callback)
+                    CallbackQueryHandler(SettingsManager.settings_callback, pattern="^(view_config|set_api_url|set_password|test_connection|delete_config|back)$")
                 ],
                 SettingsState.SET_API_URL: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, SettingsManager._set_api_url_end),

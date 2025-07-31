@@ -29,4 +29,4 @@ class MessageHandlers:
         """获取配置选择回调查询处理器"""
         from telegram.ext import CallbackQueryHandler
         from src.managers.forward_manager import ForwardManager
-        return CallbackQueryHandler(ForwardManager.handle_config_choice_callback, pattern="^(show_help|start_guide|direct_config)$")
+        return CallbackQueryHandler(ForwardManager.handle_config_choice_callback)

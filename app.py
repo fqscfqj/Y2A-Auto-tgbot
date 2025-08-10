@@ -12,7 +12,8 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from telegram.ext import Application, CommandHandler, ConversationHandler
+from telegram.ext import Application, CommandHandler, ConversationHandler, CallbackQueryHandler, Defaults
+from telegram.constants import ParseMode
 from config import Config
 from src.database.db import init_database
 from src.database.migration_manager import MigrationManager
@@ -40,7 +41,13 @@ def main():
         
         # 创建Telegram应用
         logger.info("创建Telegram应用...")
-        application = Application.builder().token(Config.TELEGRAM_TOKEN).build()
+        application = (
+            Application
+            .builder()
+            .token(Config.TELEGRAM_TOKEN)
+            .defaults(Defaults(parse_mode=ParseMode.HTML))
+            .build()
+        )
         
         # 获取命令处理器
         command_handlers = CommandHandlers.get_command_handlers()
@@ -52,10 +59,18 @@ def main():
         # 注册设置菜单对话处理器
         settings_handler = CommandHandlers.get_settings_conversation_handler()
         application.add_handler(settings_handler)
+        # 注册设置菜单的通用回调（按钮化）
+        from src.managers.settings_manager import SettingsManager
+        settings_callback_handler = CallbackQueryHandler(SettingsManager.settings_callback, pattern=r"^(view_config|set_api_url|set_password|test_connection|delete_config|confirm_delete|back|skip)$")
+        application.add_handler(settings_callback_handler)
         
         # 注册引导对话处理器
         guide_handler = CommandHandlers.get_guide_conversation_handler()
         application.add_handler(guide_handler)
+        # 注册引导相关回调（用于处理引导内按钮）
+        from src.managers.guide_manager import GuideManager
+        guide_callback_handler = CallbackQueryHandler(GuideManager.guide_callback, pattern=r"^(restart_guide|cancel_guide|next_step|skip_guide|skip_step|reconfig|send_example|complete_guide)$")
+        application.add_handler(guide_callback_handler)
         
         # 注册帮助命令处理器
         help_handler = MessageHandlers.get_help_command_handler()
@@ -69,6 +84,10 @@ def main():
         direct_config_handler = MessageHandlers.get_direct_config_command_handler()
         application.add_handler(direct_config_handler)
         
+        # 注册通用回调处理器（主菜单/快捷操作）
+        main_callback_handler = MessageHandlers.get_main_menu_callback_handler()
+        application.add_handler(main_callback_handler)
+
         # 注册消息处理器
         message_handler = MessageHandlers.get_message_handler()
         application.add_handler(message_handler)

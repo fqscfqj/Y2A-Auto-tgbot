@@ -31,8 +31,8 @@
 
 ### 环境要求
 
-- Python 3.11+
-- Telegram Bot Token
+- Python 3.10+
+- Telegram Bot Token（必需）
 - Y2A-Auto 服务实例
 
 ### 方法一：Docker部署 (推荐)
@@ -44,12 +44,14 @@
    ```
 
 2. **配置环境变量**
+   请为运行环境设置如下变量（示例为 Bash）：
    ```bash
-   cp .env.example .env
-   # 编辑 .env 文件，填入你的Telegram Bot Token和管理员ID
+   export TG_BOT_TOKEN=你的_TG_BOT_TOKEN
+   export ADMIN_TELEGRAM_IDS=123456789,987654321  # 可选，多人用逗号分隔
    ```
 
 3. **启动服务**
+   编辑 `docker-compose.yml` 填入 `TG_BOT_TOKEN` 等环境变量后执行：
    ```bash
    docker-compose up -d
    ```
@@ -69,14 +71,13 @@
 
 3. **配置环境变量**
    ```bash
-   cp .env.example .env
-   # 编辑 .env 文件，填入你的Telegram Bot Token和管理员ID
+   # 以 PowerShell 为例
+   $env:TG_BOT_TOKEN = "你的_TG_BOT_TOKEN"
+   $env:ADMIN_TELEGRAM_IDS = "123456789,987654321"  # 可选
    ```
 
 4. **运行数据库迁移**
-   ```bash
-   python src/database/migrations/001_initial.py
-   ```
+   无需手动执行，`app.py` 在启动时会自动执行待处理迁移。
 
 5. **启动机器人**
    ```bash
@@ -99,25 +100,14 @@
 #### 4. 开始使用
 配置完成后，直接向机器人发送YouTube链接即可自动转发。
 
-### 配置Y2A-Auto服务
+### 配置Y2A-Auto服务（已按钮化）
 
 #### 步骤1：打开设置菜单
-发送 `/settings` 命令，您将看到以下菜单：
-```
-⚙️ 设置菜单
-
-请选择要进行的操作:
-[查看当前配置]
-[设置Y2A-Auto API地址]
-[设置Y2A-Auto密码]
-[测试连接]
-[删除配置]
-[返回]
-```
+发送 `/settings` 命令或使用消息下方按钮打开设置。所有操作均通过内联按钮完成：查看配置、设置 API、设置密码、测试连接、删除配置等。
 
 #### 步骤2：设置API地址
-1. 点击"设置Y2A-Auto API地址"
-2. 机器人会提示您输入API地址
+1. 点击“设置 API”
+2. 机器人会提示您输入 API 地址（直接发送即可）
 3. 输入您的Y2A-Auto服务地址，例如：
    ```
    http://localhost:5000/tasks/add_via_extension
@@ -126,8 +116,8 @@
 
 #### 步骤3：设置密码（可选）
 如果您的Y2A-Auto服务启用了密码保护：
-1. 点击"设置Y2A-Auto密码"
-2. 机器人会提示您输入密码
+1. 点击“设置密码”
+2. 机器人会提示您输入密码（直接发送即可，或选择“跳过”）
 3. 输入您的Y2A-Auto服务密码
 4. 确认后，密码将被保存
 
@@ -135,24 +125,15 @@
 
 #### 步骤4：测试连接
 配置完成后，建议测试连接是否正常：
-1. 点击"测试连接"
-2. 机器人会尝试连接到您配置的Y2A-Auto服务
-3. 您将收到连接结果：
+1. 点击“测试连接”
+2. 机器人将尝试连接到您配置的 Y2A-Auto 服务并返回结果：
    - ✅ 连接成功，登录成功（如果设置了密码）
    - ✅ 连接成功（如果没有设置密码）
    - ⚠️ 连接成功，但登录失败（请检查密码）
    - ❌ 连接失败（请检查API地址）
 
 #### 步骤5：查看配置
-您可以随时点击"查看当前配置"来查看您的当前设置：
-```
-当前配置:
-
-API地址: http://localhost:5000/tasks/add_via_extension
-密码: 已设置
-配置时间: 2023-07-31 12:34:56
-最后更新: 2023-07-31 12:34:56
-```
+可随时点击“查看配置”查看当前设置（地址以代码块方式展示，更清晰）。
 
 #### 修改配置
 如果您需要修改配置：
@@ -252,11 +233,7 @@ API地址: http://localhost:5000/tasks/add_via_extension
 ```
 data/
 ├── app.db          # SQLite数据库文件
-└── logs/           # 日志目录
-    ├── app.log     # 应用日志
-    ├── user_activity.log  # 用户活动日志
-    ├── error.log   # 错误日志
-    └── api.log     # API调用日志
+└── logs/           # 日志目录（按需生成）
 ```
 
 ## 数据库结构
@@ -271,50 +248,45 @@ data/
 
 ## 开发指南
 
-### 项目结构
+### 项目结构（当前）
 
 ```
 Y2A-Auto-tgbot/
-├── app.py                 # 主应用入口
-├── config.py             # 配置管理
-├── requirements.txt      # 依赖包列表
-├── Dockerfile           # Docker镜像配置
-├── docker-compose.yml   # Docker Compose配置
-├── .env.example         # 环境变量示例
-├── README.md            # 项目说明
-├── architecture_design.md # 架构设计文档
+├── app.py                 # 主应用入口（自动执行数据库迁移）
+├── config.py              # 配置管理（环境变量校验、数据/日志目录）
+├── requirements.txt       # 依赖包列表
+├── Dockerfile             # Docker镜像配置
+├── docker-compose.yml     # Docker Compose配置
+├── README.md              # 项目说明（本文件）
 │
-├── src/                 # 源代码目录
-│   ├── database/        # 数据库相关
-│   │   ├── models.py   # 数据模型
-│   │   ├── db.py       # 数据库连接和操作
-│   │   ├── repository.py # 数据访问层
-│   │   └── migrations/ # 数据库迁移脚本
+├── src/
+│   ├── database/
+│   │   ├── db.py
+│   │   ├── models.py
+│   │   ├── repository.py
+│   │   └── migrations/
+│   │       ├── 001_initial.py
+│   │       └── 002_add_user_guides.py
 │   │
-│   ├── managers/        # 业务逻辑管理器
-│   │   ├── user_manager.py      # 用户管理
-│   │   ├── admin_manager.py     # 管理员功能
-│   │   ├── settings_manager.py  # 设置菜单
-│   │   ├── forward_manager.py   # 链接转发
-│   │   └── session_manager.py   # 会话管理
+│   ├── managers/
+│   │   ├── forward_manager.py
+│   │   ├── guide_manager.py
+│   │   ├── settings_manager.py
+│   │   ├── user_manager.py
+│   │   └── admin_manager.py
 │   │
-│   ├── handlers/        # 消息处理器
-│   │   ├── command_handlers.py  # 命令处理器
-│   │   └── message_handlers.py # 消息处理器
+│   ├── handlers/
+│   │   ├── command_handlers.py
+│   │   └── message_handlers.py
 │   │
-│   ├── utils/           # 工具函数
-│   │   ├── decorators.py       # 装饰器
-│   │   ├── logger.py          # 日志管理
-│   │   └── error_handler.py   # 错误处理
-│   │
-│   └── services/        # 外部服务接口
-│       └── y2a_service.py      # Y2A-Auto服务接口
+│   └── utils/
+│       ├── decorators.py
+│       ├── error_handler.py
+│       └── logger.py
 │
-├── data/               # 数据目录
-│   ├── app.db          # SQLite数据库文件
-│   └── logs/           # 日志目录
-│
-└── tests/              # 测试目录
+└── data/
+    ├── app.db
+    └── logs/
 ```
 
 ### 添加新功能
@@ -325,15 +297,7 @@ Y2A-Auto-tgbot/
 4. **处理器**: 在 `src/handlers/` 中添加新的命令或消息处理器
 5. **注册处理器**: 在 `app.py` 中注册新的处理器
 
-### 运行测试
-
-```bash
-# 安装测试依赖
-pip install pytest pytest-asyncio
-
-# 运行测试
-pytest tests/
-```
+（已移除过时的 tests 目录与相关说明）
 
 ## 常见问题
 

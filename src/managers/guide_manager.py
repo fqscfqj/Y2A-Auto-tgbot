@@ -95,21 +95,25 @@ class GuideManager:
     async def _show_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """显示欢迎步骤"""
         welcome_text = f"""
-👋 欢迎使用Y2A-Auto Telegram Bot，{user.first_name}！
+<b>👋 欢迎使用 Y2A-Auto Telegram Bot，{user.first_name}！</b>
 
-本机器人可以帮助您将YouTube链接自动转发到您配置的Y2A-Auto服务。
+本机器人可将 <b>YouTube</b> 链接自动转发到您的 <b>Y2A-Auto</b> 服务。
 
-🚀 接下来我将引导您完成简单的配置，只需几分钟时间！
+🚀 接下来将带您完成快速配置，仅需几分钟。
 
-💡 提示：您可以随时输入 /skip 跳过引导，或输入 /cancel 取消。
-
-请输入 /continue 继续引导，或输入 /skip 跳过引导。
+提示：随时可发送 /skip 跳过引导，或 /cancel 取消。
 """
+        keyboard = [
+            [InlineKeyboardButton("➡️ 继续", callback_data="next_step")],
+            [InlineKeyboardButton("⚙️ 打开设置", callback_data="main:settings")],
+            [InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         if update.callback_query:
-            await update.callback_query.edit_message_text(welcome_text)
+            await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup)
         else:
-            await update.message.reply_text(welcome_text)
+            await update.message.reply_text(welcome_text, reply_markup=reply_markup)
         
         return GuideState.WELCOME
     
@@ -117,29 +121,28 @@ class GuideManager:
     async def _show_intro_features(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """显示功能介绍步骤"""
         intro_text = """
-🤖 Y2A-Auto Telegram Bot 功能介绍：
+<b>🤖 功能一览</b>
+• 自动转发 YouTube 链接到 Y2A-Auto
+• 支持视频 / 播放列表
+• 自动处理认证
+• 记录转发历史与统计
 
-✨ 主要功能：
-• 自动转发YouTube链接到Y2A-Auto服务
-• 支持YouTube视频和播放列表链接
-• 自动处理认证和连接
-• 记录转发历史和统计信息
-
-📋 使用流程：
-1. 配置Y2A-Auto服务的API地址
-2. （可选）设置访问密码
-3. 测试连接是否正常
-4. 发送YouTube链接即可自动转发
-
-准备好了吗？让我们开始配置吧！
-
-请输入 /continue 继续下一步，或输入 /skip 跳过引导。
+<b>📋 使用流程</b>
+1) 设置 Y2A-Auto API 地址
+2) （可选）设置密码
+3) 测试连接
+4) 发送链接自动转发
 """
+        keyboard = [
+            [InlineKeyboardButton("➡️ 继续", callback_data="next_step")],
+            [InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"), InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         if update.callback_query:
-            await update.callback_query.edit_message_text(intro_text)
+            await update.callback_query.edit_message_text(intro_text, reply_markup=reply_markup)
         else:
-            await update.message.reply_text(intro_text)
+            await update.message.reply_text(intro_text, reply_markup=reply_markup)
         
         return GuideState.INTRO_FEATURES
     
@@ -147,15 +150,14 @@ class GuideManager:
     async def _config_api(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """配置API地址步骤"""
         config_text = """
-⚙️ 配置Y2A-Auto API地址
-
-请输入您的Y2A-Auto服务的API地址，例如：
+<b>⚙️ 配置 Y2A-Auto API 地址</b>
+例如：
 • http://localhost:5000/tasks/add_via_extension
 • http://192.168.1.100:5000/tasks/add_via_extension
 
-💡 提示：这是您部署Y2A-Auto服务的地址，通常以 /tasks/add_via_extension 结尾。
+提示：通常以 <code>/tasks/add_via_extension</code> 结尾。
 
-请输入API地址，或输入 /skip 跳过此步骤：
+请直接发送 API 地址，或发送 /skip 跳过。
 """
         
         if update.callback_query:
@@ -169,10 +171,9 @@ class GuideManager:
     async def _config_password(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """配置密码步骤"""
         password_text = """
-🔐 配置Y2A-Auto密码（可选）
-
-如果您的Y2A-Auto服务设置了访问密码，请在此输入。
-如果没有设置密码，可以直接输入 /skip 跳过此步骤。
+<b>🔐 配置密码（可选）</b>
+如果您的 Y2A-Auto 服务设置了访问密码，请在此输入。
+若无需密码，发送 /skip 跳过。
 
 请输入密码：
 """
@@ -205,19 +206,21 @@ class GuideManager:
         result = await ForwardManager.test_connection(update, context, user, config)
         
         test_text = f"""
-🔌 连接测试结果：
+<b>🔌 连接测试结果</b>
 
 {result}
 
-如果连接失败，请检查您的配置是否正确，或使用 /settings 命令重新配置。
-
-请输入 /continue 继续下一步，或输入 /reconfig 重新配置。
+若失败，请检查配置，或点击下方按钮重新配置。
 """
+        keyboard = [
+            [InlineKeyboardButton("➡️ 继续", callback_data="next_step"), InlineKeyboardButton("🔁 重新配置", callback_data="reconfig")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         if update.callback_query:
-            await update.callback_query.edit_message_text(test_text)
+            await update.callback_query.edit_message_text(test_text, reply_markup=reply_markup)
         else:
-            await update.message.reply_text(test_text)
+            await update.message.reply_text(test_text, reply_markup=reply_markup)
         
         return GuideState.TEST_CONNECTION
     
@@ -225,21 +228,21 @@ class GuideManager:
     async def _send_example(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """发送示例链接步骤"""
         example_text = f"""
-🎯 最后一步：发送示例链接
+<b>🎯 最后一步：发送示例链接</b>
+现在您可以发送 YouTube 链接进行转发了。也可点击下方按钮发送示例：
 
-现在您可以发送YouTube链接进行转发了！让我为您演示一下：
-
-请输入 /send_example 发送示例链接，或者您也可以自己发送一个YouTube链接。
-
-示例链接：{GuideManager.EXAMPLE_YOUTUBE_URL}
-
-请输入 /send_example 发送示例链接，或输入 /complete 完成引导。
+示例：{GuideManager.EXAMPLE_YOUTUBE_URL}
 """
+        keyboard = [
+            [InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example")],
+            [InlineKeyboardButton("✅ 完成引导", callback_data="complete_guide")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         if update.callback_query:
-            await update.callback_query.edit_message_text(example_text)
+            await update.callback_query.edit_message_text(example_text, reply_markup=reply_markup)
         else:
-            await update.message.reply_text(example_text)
+            await update.message.reply_text(example_text, reply_markup=reply_markup)
         
         return GuideState.SEND_EXAMPLE
     
@@ -247,20 +250,20 @@ class GuideManager:
     async def _complete_guide(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """完成引导"""
         complete_text = """
-🎉 恭喜！您已经完成了所有引导步骤！
-
+<b>🎉 引导完成</b>
 现在您可以：
-• 直接发送YouTube链接进行转发
-• 使用 /settings 命令修改配置
-• 使用 /help 命令查看帮助信息
-
-感谢您使用Y2A-Auto Telegram Bot！如有问题，请联系管理员。
+• 直接发送 YouTube 链接进行转发
+• 点击下方按钮修改配置或查看帮助
 """
+        keyboard = [
+            [InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"), InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         if update.callback_query:
-            await update.callback_query.edit_message_text(complete_text)
+            await update.callback_query.edit_message_text(complete_text, reply_markup=reply_markup)
         else:
-            await update.message.reply_text(complete_text)
+            await update.message.reply_text(complete_text, reply_markup=reply_markup)
         
         # 更新引导状态为已完成
         guide.is_completed = True

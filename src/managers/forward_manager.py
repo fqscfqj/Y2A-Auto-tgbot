@@ -15,6 +15,21 @@ logger = logging.getLogger(__name__)
 
 class ForwardManager:
     """转发管理器，负责处理YouTube链接的转发逻辑"""
+    @staticmethod
+    def main_menu_markup(include_example: bool = False) -> InlineKeyboardMarkup:
+        """生成主菜单快捷操作按钮"""
+        keyboard = [
+            [
+                InlineKeyboardButton("🚀 开始引导", callback_data="main:start"),
+                InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"),
+            ],
+            [
+                InlineKeyboardButton("❓ 帮助", callback_data="main:help"),
+            ],
+        ]
+        if include_example:
+            keyboard[1].insert(0, InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example"))
+        return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
     def is_youtube_url(text: str) -> bool:
@@ -72,16 +87,17 @@ class ForwardManager:
             
             if guide and not guide.is_completed and not guide.is_skipped:
                 # 用户正在引导过程中，提示继续引导
-                await update.message.reply_text(
-                    "您尚未完成配置。请继续引导流程完成配置，或使用 /settings 命令直接配置。"
+                message = update.effective_message
+                await message.reply_text(
+                    "您尚未完成配置。请继续引导流程完成配置，或点击下方按钮打开设置。",
+                    reply_markup=ForwardManager.main_menu_markup()
                 )
             else:
                 # 用户未开始引导或已跳过引导
-                await update.message.reply_text(
-                    "您尚未配置Y2A-Auto服务。请使用以下命令进行配置：\n\n"
-                    "• /start - 开始引导配置\n"
-                    "• /settings - 直接配置\n\n"
-                    "请输入您选择的命令："
+                message = update.effective_message
+                await message.reply_text(
+                    "您尚未配置Y2A-Auto服务。可点击下方按钮开始引导或进入设置：",
+                    reply_markup=ForwardManager.main_menu_markup()
                 )
             return
         
@@ -96,7 +112,8 @@ class ForwardManager:
             return
         
         # 发送正在转发的消息
-        await update.message.reply_text('检测到YouTube链接，正在转发到Y2A-Auto...')
+        message = update.effective_message
+        await message.reply_text('检测到YouTube链接，正在转发到Y2A-Auto...')
         
         # 创建转发记录
         forward_record = ForwardRecord(
@@ -121,9 +138,9 @@ class ForwardManager:
             
             # 发送结果消息
             if success:
-                await update.message.reply_text(f"✅ 转发成功：{message}")
+                await update.effective_message.reply_text(f"✅ 转发成功：{message}")
             else:
-                await update.message.reply_text(f"❌ 转发失败：{message}")
+                await update.effective_message.reply_text(f"❌ 转发失败：{message}")
         
         except Exception as e:
             logger.error(f"转发异常: {e}")
@@ -136,7 +153,7 @@ class ForwardManager:
             # 更新用户统计
             UserStatsRepository.increment_stats(user.id, False)
             
-            await update.message.reply_text(f"❌ 转发异常：{e}")
+            await update.effective_message.reply_text(f"❌ 转发异常：{e}")
     
     @staticmethod
     async def _execute_forward(youtube_url: str, config: UserConfig) -> tuple[bool, str]:
@@ -185,20 +202,15 @@ class ForwardManager:
             
             if guide and not guide.is_completed and not guide.is_skipped:
                 # 用户正在引导过程中，提示继续引导
-                await update.message.reply_text(
-                    '请发送有效的YouTube视频或播放列表链接。\n'
-                    '如果您需要帮助，请输入 /help 查看可用命令。\n'
-                    '您也可以继续完成引导流程来配置机器人。'
+                await update.effective_message.reply_text(
+                    '请发送有效的YouTube视频或播放列表链接。\n\n您也可以点击下方按钮继续引导或打开设置。',
+                    reply_markup=ForwardManager.main_menu_markup()
                 )
             else:
                 # 提供命令提示
-                await update.message.reply_text(
-                    '请发送有效的YouTube视频或播放列表链接。\n\n'
-                    '🤖 您可以尝试以下操作：\n'
-                    '• /help - 查看帮助\n'
-                    '• /start - 开始引导\n'
-                    '• /settings - 直接配置\n\n'
-                    '请输入您选择的命令：'
+                await update.effective_message.reply_text(
+                    '请发送有效的YouTube视频或播放列表链接。\n\n也可以使用下方快捷操作：',
+                    reply_markup=ForwardManager.main_menu_markup(include_example=True)
                 )
     
     @staticmethod
@@ -234,8 +246,12 @@ class ForwardManager:
     @staticmethod
     async def handle_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理帮助命令"""
-        from src.handlers.command_handlers import CommandHandlers
-        await CommandHandlers.help_command(update, context)
+        from src.handlers.command_handlers import HELP_TEXT
+        markup = ForwardManager.main_menu_markup(include_example=True)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(HELP_TEXT, reply_markup=markup)
+        else:
+            await update.effective_message.reply_text(HELP_TEXT, reply_markup=markup)
     
     @staticmethod
     async def handle_start_guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

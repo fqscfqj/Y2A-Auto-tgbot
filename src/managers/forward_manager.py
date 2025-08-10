@@ -229,6 +229,15 @@ class ForwardManager:
         user = await UserManager.ensure_user_registered(update, context)
         text = update.message.text.strip()
         
+        # 优先处理设置流程：如果用户在设置 API/密码的状态中，应将文本视为输入而非当作链接
+        from src.managers.settings_manager import SettingsState
+        user_data = context.user_data
+        # ConversationHandler 通常管理状态在内部，这里额外根据提示语与最近动作进行兜底判断：
+        pending_input = user_data.get("pending_input")
+        if pending_input in ("set_api", "set_password"):
+            # 交由 SettingsManager 的消息处理器在会话里接收，这里不抢占
+            return
+
         if ForwardManager.is_youtube_url(text):
             await ForwardManager.forward_youtube_url(update, context, text)
         else:

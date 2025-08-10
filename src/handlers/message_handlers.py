@@ -65,8 +65,6 @@ class MessageHandlers:
 
         if data == "main:start":
             await GuideManager.start_guide(update, context)
-        elif data == "main:settings":
-            await SettingsManager.settings_command(update, context)
         elif data == "main:help":
             await ForwardManager.handle_help_command(update, context)
         elif data == "main:send_example":
@@ -78,4 +76,4 @@ class MessageHandlers:
     @staticmethod
     def get_main_menu_callback_handler() -> CallbackQueryHandler:
         """获取主菜单回调处理器"""
-        return CallbackQueryHandler(MessageHandlers.handle_main_menu_callback, pattern=r"^main:")
+        return CallbackQueryHandler(MessageHandlers.handle_main_menu_callback, pattern=r"^(main:start|main:help|main:send_example)$")

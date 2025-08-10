@@ -105,7 +105,6 @@ class GuideManager:
 """
         keyboard = [
             [InlineKeyboardButton("➡️ 继续", callback_data="next_step")],
-            [InlineKeyboardButton("⚙️ 打开设置", callback_data="main:settings")],
             [InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -135,7 +134,7 @@ class GuideManager:
 """
         keyboard = [
             [InlineKeyboardButton("➡️ 继续", callback_data="next_step")],
-            [InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"), InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
+            [InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         

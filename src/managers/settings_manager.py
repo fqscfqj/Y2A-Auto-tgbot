@@ -156,6 +156,8 @@ class SettingsManager:
             "请直接发送新的 API 地址。\n\n"
             "例如: <code>http://localhost:5000/tasks/add_via_extension</code>"
         )
+        # 标记当前需要用户发送的输入类型，避免普通消息处理器误判
+        context.user_data['pending_input'] = 'set_api'
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=SettingsManager._back_markup())
         else:
@@ -169,6 +171,9 @@ class SettingsManager:
         user = await UserManager.ensure_user_registered(update, context)
         api_url = update.message.text.strip()
         
+        # 清除 pending 标记
+        context.user_data.pop('pending_input', None)
+
         if not api_url:
             await update.message.reply_text("API地址不能为空，请重新输入", reply_markup=SettingsManager._back_markup())
             return SettingsState.SET_API_URL
@@ -208,6 +213,7 @@ class SettingsManager:
             [InlineKeyboardButton("⏭️ 跳过", callback_data="skip")],
             [InlineKeyboardButton("⬅️ 返回", callback_data="back")],
         ])
+        context.user_data['pending_input'] = 'set_password'
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=markup)
         else:
@@ -221,6 +227,8 @@ class SettingsManager:
         user = await UserManager.ensure_user_registered(update, context)
         password = update.message.text.strip()
         
+        context.user_data.pop('pending_input', None)
+
         # 获取现有配置
         config = UserManager.get_user_config(user.id)
         if not config:

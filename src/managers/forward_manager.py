@@ -271,30 +271,61 @@ class ForwardManager:
         """测试Y2A-Auto连接"""
         session = ForwardManager.get_session()
         clean_url = ForwardManager.parse_api_url(config.y2a_api_url)
-        
-        try:
-            # 尝试访问登录页面来测试连接
-            login_url = config.y2a_api_url.replace('/tasks/add_via_extension', '/login')
-            resp = session.get(login_url, timeout=10)
-            
+
+        def try_get(url: str, verify: bool | None = None):
+            try:
+                kwargs = {"timeout": 10, "allow_redirects": True}
+                if verify is not None:
+                    kwargs["verify"] = verify
+                resp = session.get(url, **kwargs)
+                return resp, None
+            except requests.exceptions.RequestException as e:
+                return None, e
+
+        # 1) 首选访问 /login（最轻量且不改动数据）
+        login_url = config.y2a_api_url.replace('/tasks/add_via_extension', '/login')
+
+        # 1.1 正常证书校验
+        resp, err = try_get(login_url, verify=None)
+        # 1.2 若证书问题，允许忽略证书重试
+        if err and isinstance(err, requests.exceptions.SSLError):
+            resp, err = try_get(login_url, verify=False)
+
+        # 1.3 若仍连接错误且是 https，试试 http 回退
+        if (err and isinstance(err, requests.exceptions.ConnectionError)
+                and login_url.startswith("https://")):
+            http_login = login_url.replace("https://", "http://", 1)
+            resp, err = try_get(http_login, verify=None)
+
+        if resp is not None:
+            # 能连上服务器
             if resp.status_code == 200:
-                # 如果配置了密码，尝试登录
                 if config.y2a_password:
                     if ForwardManager.try_login(session, config.y2a_api_url, config.y2a_password):
                         return "✅ 连接成功，登录成功"
-                    else:
-                        return "⚠️ 连接成功，但登录失败，请检查密码"
-                else:
-                    return "✅ 连接成功"
-            else:
-                return f"❌ 连接失败，状态码：{resp.status_code}"
-        
-        except requests.exceptions.ConnectionError:
-            return "❌ 连接失败，无法连接到服务器"
-        except requests.exceptions.Timeout:
+                    return "⚠️ 连接成功，但登录失败，请检查密码"
+                return "✅ 连接成功"
+            # 401/403 表示服务可达但需要鉴权
+            if resp.status_code in (401, 403):
+                return "⚠️ 服务可达，但需要登录或权限不足，请检查密码或服务设置"
+            # 其余状态码，但已连接上
+            return f"⚠️ 服务可达，但返回状态码：{resp.status_code}"
+
+        # 2) /login 不可达，最后尝试目标 API 路径以区分网络问题
+        resp2, err2 = try_get(clean_url, verify=None)
+        if resp2 is not None:
+            if resp2.status_code in (200, 400, 401, 403, 404, 405):
+                return f"⚠️ 服务可达（状态码 {resp2.status_code}），但 /login 不可达，请检查服务配置"
+
+        # 3) 仍然不可达，给出更明确的错误提示
+        if isinstance(err or err2, requests.exceptions.Timeout):
             return "❌ 连接失败，请求超时"
-        except Exception as e:
-            return f"❌ 连接失败：{e}"
+        if isinstance(err or err2, requests.exceptions.ConnectionError):
+            return "❌ 连接失败，无法连接到服务器（网络/端口/防火墙）"
+        if isinstance(err or err2, requests.exceptions.SSLError):
+            return "❌ 连接失败，TLS/证书错误，可尝试使用 http 或正确配置证书"
+
+        return f"❌ 连接失败：{(err or err2) or '未知错误'}"
     
     @staticmethod
     async def handle_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -153,8 +153,8 @@ class SettingsManager:
         """开始设置API地址"""
         text = (
             "<b>设置 API 地址</b>\n\n"
-            "请直接发送新的 API 地址。\n\n"
-            "例如: <code>http://localhost:5000/tasks/add_via_extension</code>"
+            "请直接发送新的 API 地址（支持只写主机:端口，将自动补全）。\n\n"
+            "示例: <code>https://y2a.example.com:4443</code> 或 <code>http://localhost:5000</code>"
         )
         # 标记当前需要用户发送的输入类型，避免普通消息处理器误判
         context.user_data['pending_input'] = 'set_api'
@@ -180,9 +180,9 @@ class SettingsManager:
         
         # 允许用户只输入域名:端口，或完整URL；统一规范化
         from src.managers.forward_manager import ForwardManager
+        # 若缺少协议，默认补 https://
         if not (api_url.startswith('http://') or api_url.startswith('https://')):
-            await update.message.reply_text("API地址必须以http://或https://开头，请重新输入", reply_markup=SettingsManager._back_markup())
-            return SettingsState.SET_API_URL
+            api_url = 'https://' + api_url
         api_url = ForwardManager.normalize_api_url(api_url)
         
         # 获取现有配置

@@ -16,6 +16,41 @@ logger = logging.getLogger(__name__)
 class ForwardManager:
     """转发管理器，负责处理YouTube链接的转发逻辑"""
     @staticmethod
+    def normalize_api_url(input_url: str) -> str:
+        """规范化用户输入的 API 地址。
+        - 允许仅提供主机(含端口)，会自动补全为 /tasks/add_via_extension
+        - 去除多余空白和尾部斜杠
+        - 保留协议、主机、端口
+        """
+        if not input_url:
+            return input_url
+        raw = input_url.strip()
+        # 如果没有协议，直接返回原值（上层会校验协议）
+        try:
+            parsed = urlparse(raw)
+        except Exception:
+            return raw
+
+        scheme = parsed.scheme
+        netloc = parsed.netloc or parsed.path  # 兼容用户粘贴仅主机的情况
+        path = parsed.path if parsed.netloc else ""
+
+        # 只接受 http/https；其余交给上层校验
+        if scheme not in ("http", "https"):
+            return raw
+
+        # 规范化路径，若为空或根路径，则补全；若包含 add_via_extension 则保持（去掉尾部斜杠）
+        if not path or path == "/":
+            norm_path = "/tasks/add_via_extension"
+        elif "add_via_extension" in path:
+            norm_path = "/tasks/add_via_extension"
+        else:
+            # 用户给了其他路径，仍然强制到正确的添加任务接口
+            norm_path = "/tasks/add_via_extension"
+
+        # 重新组装，不带用户名密码、查询与片段
+        return urlunparse((scheme, netloc, norm_path.rstrip("/"), "", "", ""))
+    @staticmethod
     def main_menu_markup(include_example: bool = False) -> InlineKeyboardMarkup:
         """生成主菜单快捷操作按钮"""
         keyboard = [

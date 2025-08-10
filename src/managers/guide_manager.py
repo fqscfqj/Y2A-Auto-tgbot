@@ -151,13 +151,14 @@ class GuideManager:
         """配置API地址步骤"""
         config_text = """
 <b>⚙️ 配置 Y2A-Auto API 地址</b>
-例如：
-• http://localhost:5000/tasks/add_via_extension
-• http://192.168.1.100:5000/tasks/add_via_extension
+示例：
+• <code>https://y2a.example.com:4443</code>
+• <code>http://localhost:5000</code>
+• <code>http://192.168.1.100:5000</code>
 
-提示：通常以 <code>/tasks/add_via_extension</code> 结尾。
+提示：只需提供主机(可含端口)，系统会自动补全为 <code>/tasks/add_via_extension</code>。
 
-请直接发送 API 地址，或发送 /skip 跳过。
+请直接发送地址，或发送 /skip 跳过。
 """
         
         if update.callback_query:

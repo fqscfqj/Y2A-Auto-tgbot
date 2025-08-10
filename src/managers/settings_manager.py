@@ -173,10 +173,12 @@ class SettingsManager:
             await update.message.reply_text("API地址不能为空，请重新输入", reply_markup=SettingsManager._back_markup())
             return SettingsState.SET_API_URL
         
-        # 验证API地址格式
+        # 允许用户只输入域名:端口，或完整URL；统一规范化
+        from src.managers.forward_manager import ForwardManager
         if not (api_url.startswith('http://') or api_url.startswith('https://')):
             await update.message.reply_text("API地址必须以http://或https://开头，请重新输入", reply_markup=SettingsManager._back_markup())
             return SettingsState.SET_API_URL
+        api_url = ForwardManager.normalize_api_url(api_url)
         
         # 获取现有配置
         config = UserManager.get_user_config(user.id)

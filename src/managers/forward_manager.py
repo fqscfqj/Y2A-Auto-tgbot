@@ -91,23 +91,8 @@ class ForwardManager:
     
     @staticmethod
     def get_session() -> requests.Session:
-        """返回预配置的 requests.Session。
-        - 默认强制使用 IPv4（很多 Docker 环境缺少 IPv6，避免优先走 AAAA 导致连不上）
-        - 可通过环境变量 FORCE_IPV4=0 关闭此行为
-        """
+        """返回预配置的 requests.Session。"""
         session = requests.Session()
-        if os.getenv("FORCE_IPV4", "1") == "1":
-            try:
-                import socket
-                import urllib3.util.connection as urllib3_connection
-
-                def _allowed_gai_family() -> int:
-                    return socket.AF_INET
-
-                urllib3_connection.allowed_gai_family = _allowed_gai_family
-                logger.info("已启用 IPv4 优先策略 (FORCE_IPV4=1)")
-            except Exception as e:
-                logger.warning(f"启用 IPv4 优先策略失败: {e}")
         return session
     
     @staticmethod

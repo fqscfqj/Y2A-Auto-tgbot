@@ -264,6 +264,25 @@ class ForwardManager:
                 # 无论是否成功，均停止后续作为普通消息的处理
                 return
 
+        # 兜底处理引导流程：若用户正处于引导步骤中的“配置 API/密码”，
+        # 且当前并非由 ConversationHandler 接管（例如通过主菜单按钮进入引导），
+        # 则将本次文本输入交给引导的对应处理函数，避免用户感觉“卡住”。
+        try:
+            from src.database.models import GuideStep
+            guide = UserManager.get_user_guide(user.id)
+            if guide and not guide.is_completed and not guide.is_skipped:
+                if guide.current_step == GuideStep.CONFIG_API.value:
+                    from src.managers.guide_manager import GuideManager
+                    await GuideManager.handle_api_input(update, context)
+                    return
+                if guide.current_step == GuideStep.CONFIG_PASSWORD.value:
+                    from src.managers.guide_manager import GuideManager
+                    await GuideManager.handle_password_input(update, context)
+                    return
+        except Exception as _:
+            # 兜底逻辑不应影响正常流程，忽略异常
+            pass
+
         if ForwardManager.is_youtube_url(text):
             await ForwardManager.forward_youtube_url(update, context, text)
         else:

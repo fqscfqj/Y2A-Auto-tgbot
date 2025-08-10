@@ -392,15 +392,18 @@ class GuideManager:
             return ConversationHandler.END
         
         api_url = update.message.text.strip()
-        
+
         if not api_url:
             await update.message.reply_text("API地址不能为空，请重新输入")
             return GuideState.CONFIG_API
-        
-        # 验证API地址格式
+
+        # 与设置菜单逻辑保持一致：
+        # - 允许只输入主机(可含端口)，默认补 https://
+        # - 统一规范化为 /tasks/add_via_extension
+        from src.managers.forward_manager import ForwardManager
         if not (api_url.startswith('http://') or api_url.startswith('https://')):
-            await update.message.reply_text("API地址必须以http://或https://开头，请重新输入")
-            return GuideState.CONFIG_API
+            api_url = 'https://' + api_url
+        api_url = ForwardManager.normalize_api_url(api_url)
         
         # 获取现有配置
         config = UserManager.get_user_config(user.id)

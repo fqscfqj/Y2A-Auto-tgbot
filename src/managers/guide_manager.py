@@ -148,6 +148,12 @@ class GuideManager:
     @staticmethod
     async def _config_api(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """配置API地址步骤"""
+        # 确保引导记录中的当前步骤同步为 CONFIG_API，
+        # 以便通用消息处理可兜底识别并路由到此步骤的输入处理。
+        if guide.current_step != GuideStep.CONFIG_API.value:
+            guide.current_step = GuideStep.CONFIG_API.value
+            guide.updated_at = datetime.now()
+            UserGuideRepository.update(guide)
         config_text = """
 <b>⚙️ 配置 Y2A-Auto API 地址</b>
 示例：
@@ -170,6 +176,11 @@ class GuideManager:
     @staticmethod
     async def _config_password(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, guide: UserGuide) -> int:
         """配置密码步骤"""
+        # 同步步骤为 CONFIG_PASSWORD，保证兜底逻辑可识别
+        if guide.current_step != GuideStep.CONFIG_PASSWORD.value:
+            guide.current_step = GuideStep.CONFIG_PASSWORD.value
+            guide.updated_at = datetime.now()
+            UserGuideRepository.update(guide)
         password_text = """
 <b>🔐 配置密码（可选）</b>
 如果您的 Y2A-Auto 服务设置了访问密码，请在此输入。

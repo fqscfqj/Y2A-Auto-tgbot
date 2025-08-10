@@ -1,4 +1,5 @@
 import logging
+import os
 import requests
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse, urlunparse
@@ -90,8 +91,24 @@ class ForwardManager:
     
     @staticmethod
     def get_session() -> requests.Session:
-        """返回requests.Session()，如后续需扩展可在此配置。"""
-        return requests.Session()
+        """返回预配置的 requests.Session。
+        - 默认强制使用 IPv4（很多 Docker 环境缺少 IPv6，避免优先走 AAAA 导致连不上）
+        - 可通过环境变量 FORCE_IPV4=0 关闭此行为
+        """
+        session = requests.Session()
+        if os.getenv("FORCE_IPV4", "1") == "1":
+            try:
+                import socket
+                import urllib3.util.connection as urllib3_connection
+
+                def _allowed_gai_family() -> int:
+                    return socket.AF_INET
+
+                urllib3_connection.allowed_gai_family = _allowed_gai_family
+                logger.info("已启用 IPv4 优先策略 (FORCE_IPV4=1)")
+            except Exception as e:
+                logger.warning(f"启用 IPv4 优先策略失败: {e}")
+        return session
     
     @staticmethod
     def try_login(session: requests.Session, y2a_api_url: str, y2a_password: str) -> bool:

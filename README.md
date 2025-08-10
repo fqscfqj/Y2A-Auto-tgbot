@@ -1,6 +1,6 @@
-# Y2A-Auto Telegram Bot (多用户版本)
+# Y2A-Auto Telegram Bot
 
-本机器人是一个多用户版本的Telegram机器人，用于接收YouTube视频或播放列表链接，并自动转发到用户配置的Y2A-Auto服务。
+本机器人是一个多用户的Telegram机器人，用于接收YouTube视频或播放列表链接，并自动转发到用户配置的Y2A-Auto服务。
 
 ## 功能特点
 

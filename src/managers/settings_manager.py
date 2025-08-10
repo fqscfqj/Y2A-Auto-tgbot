@@ -3,7 +3,7 @@ import html
 from typing import Dict, Any, Optional, Tuple
 from enum import Enum
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from src.managers.user_manager import UserManager
@@ -160,8 +160,16 @@ class SettingsManager:
         context.user_data['pending_input'] = 'set_api'
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=SettingsManager._back_markup())
+            await update.effective_chat.send_message(
+                "请在此输入 API 地址：",
+                reply_markup=ForceReply(input_field_placeholder="https://y2a.example.com:4443 或 http://host:port")
+            )
         else:
             await update.effective_message.reply_text(text, reply_markup=SettingsManager._back_markup())
+            await update.effective_message.reply_text(
+                "请在此输入 API 地址：",
+                reply_markup=ForceReply(input_field_placeholder="https://y2a.example.com:4443 或 http://host:port")
+            )
         
         return SettingsState.SET_API_URL
     

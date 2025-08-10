@@ -235,8 +235,17 @@ class ForwardManager:
         # ConversationHandler 通常管理状态在内部，这里额外根据提示语与最近动作进行兜底判断：
         pending_input = user_data.get("pending_input")
         if pending_input in ("set_api", "set_password"):
-            # 交由 SettingsManager 的消息处理器在会话里接收，这里不抢占
-            return
+            # 兜底处理：若当前不是由 ConversationHandler 接管（例如通过主菜单按钮进入设置），
+            # 则直接调用对应的设置处理函数完成保存，避免用户输入被当作普通消息忽略。
+            try:
+                from src.managers.settings_manager import SettingsManager
+                if pending_input == "set_api":
+                    await SettingsManager._set_api_url_end(update, context)
+                elif pending_input == "set_password":
+                    await SettingsManager._set_password_end(update, context)
+            finally:
+                # 无论是否成功，均停止后续作为普通消息的处理
+                return
 
         if ForwardManager.is_youtube_url(text):
             await ForwardManager.forward_youtube_url(update, context, text)

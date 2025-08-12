@@ -171,11 +171,34 @@ class CommandHandlers:
             await update.message.reply_text("❌ 处理命令时出错")
     
     @staticmethod
+    async def clear_reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """清除历史 ForceReply 提示。
+        使用方法：对那条“请在此输入 API 地址：”的消息进行回复，并发送 /clear_reply。
+        机器人会尝试删除被回复的那条消息，从而清理输入框的固定回复提示。
+        """
+        await UserManager.ensure_user_registered(update, context)
+        msg = update.message
+        target = getattr(msg, "reply_to_message", None)
+
+        if target and getattr(target.from_user, "is_bot", False):
+            try:
+                await context.bot.delete_message(chat_id=msg.chat_id, message_id=target.message_id)
+                await msg.reply_text("✅ 已清除强制回复提示。若仍看到提示，请关闭并重新打开聊天试试。")
+                return
+            except Exception as e:
+                logger.error(f"清除 ForceReply 失败: {e}")
+                # 继续给出指导
+        await msg.reply_text(
+            "ℹ️ 请先对那条提示消息进行“回复”，再发送 /clear_reply，我才能删除它。"
+        )
+    
+    @staticmethod
     def get_command_handlers() -> Dict[str, Any]:
         """获取所有命令处理器"""
         return {
             'start': CommandHandlers.start_command,
             'help': CommandHandlers.help_command,
+            'clear_reply': CommandHandlers.clear_reply_command,
             'admin_users': CommandHandlers.admin_users_command,
             'admin_stats': CommandHandlers.admin_stats_command,
             'admin_user': CommandHandlers.admin_user_command,

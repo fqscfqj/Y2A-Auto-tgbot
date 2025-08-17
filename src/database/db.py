@@ -132,7 +132,9 @@ def execute_insert(query: str, params: tuple = ()) -> int:
     try:
         cursor.execute(query, params)
         conn.commit()
-        return cursor.lastrowid
+        last_id = cursor.lastrowid
+        # 确保返回 int（sqlite3 的 lastrowid 在某些情况下可能为 None）
+        return int(last_id) if last_id is not None else 0
     except sqlite3.Error as e:
         logger.error(f"插入操作失败: {e}, 查询: {query}, 参数: {params}")
         conn.rollback()

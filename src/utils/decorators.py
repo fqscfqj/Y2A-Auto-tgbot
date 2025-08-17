@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import Callable, Any, Dict
+from typing import Callable, Any, Dict, Optional
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -19,7 +19,12 @@ def require_user_session(func: Callable) -> Callable:
             # 获取用户信息
             telegram_user = update.effective_user
             if not telegram_user:
-                await update.message.reply_text("❌ 无法获取用户信息")
+                if update.message:
+                    await update.message.reply_text("❌ 无法获取用户信息")
+                elif update.callback_query:
+                    await update.callback_query.answer("❌ 无法获取用户信息", show_alert=True)
+                else:
+                    logger.warning("无法向用户发送消息：既没有 message 也没有 callback_query")
                 return
             
             # 获取或创建会话
@@ -31,6 +36,8 @@ def require_user_session(func: Callable) -> Callable:
             })
             
             # 将会话添加到上下文
+            if context.user_data is None:
+                context.user_data = {}  # type: ignore[assignment]
             context.user_data['session'] = session
             
             # 调用原函数
@@ -38,7 +45,12 @@ def require_user_session(func: Callable) -> Callable:
             
         except Exception as e:
             logger.error(f"会话处理错误: {e}")
-            await update.message.reply_text("❌ 处理请求时出错")
+            if update.message:
+                await update.message.reply_text("❌ 处理请求时出错")
+            elif update.callback_query:
+                await update.callback_query.answer("❌ 处理请求时出错", show_alert=True)
+            else:
+                logger.exception("无法发送错误消息：既没有 message 也没有 callback_query")
     
     return wrapper
 
@@ -52,12 +64,22 @@ def require_admin(func: Callable) -> Callable:
             # 获取用户信息
             telegram_user = update.effective_user
             if not telegram_user:
-                await update.message.reply_text("❌ 无法获取用户信息")
+                if update.message:
+                    await update.message.reply_text("❌ 无法获取用户信息")
+                elif update.callback_query:
+                    await update.callback_query.answer("❌ 无法获取用户信息", show_alert=True)
+                else:
+                    logger.warning("无法向用户发送消息：既没有 message 也没有 callback_query")
                 return
             
             # 检查管理员权限
             if not session_manager.is_user_admin(telegram_user.id):
-                await update.message.reply_text("❌ 您没有权限执行此操作")
+                if update.message:
+                    await update.message.reply_text("❌ 您没有权限执行此操作")
+                elif update.callback_query:
+                    await update.callback_query.answer("❌ 您没有权限执行此操作", show_alert=True)
+                else:
+                    logger.warning("权限拒绝，但无法通知用户：既没有 message 也没有 callback_query")
                 return
             
             # 获取或创建会话
@@ -69,6 +91,8 @@ def require_admin(func: Callable) -> Callable:
             })
             
             # 将会话添加到上下文
+            if context.user_data is None:
+                context.user_data = {}  # type: ignore[assignment]
             context.user_data['session'] = session
             
             # 调用原函数
@@ -76,7 +100,12 @@ def require_admin(func: Callable) -> Callable:
             
         except Exception as e:
             logger.error(f"权限检查错误: {e}")
-            await update.message.reply_text("❌ 处理请求时出错")
+            if update.message:
+                await update.message.reply_text("❌ 处理请求时出错")
+            elif update.callback_query:
+                await update.callback_query.answer("❌ 处理请求时出错", show_alert=True)
+            else:
+                logger.exception("无法发送错误消息：既没有 message 也没有 callback_query")
     
     return wrapper
 
@@ -90,7 +119,12 @@ def require_configured_user(func: Callable) -> Callable:
             # 获取用户信息
             telegram_user = update.effective_user
             if not telegram_user:
-                await update.message.reply_text("❌ 无法获取用户信息")
+                if update.message:
+                    await update.message.reply_text("❌ 无法获取用户信息")
+                elif update.callback_query:
+                    await update.callback_query.answer("❌ 无法获取用户信息", show_alert=True)
+                else:
+                    logger.warning("无法向用户发送消息：既没有 message 也没有 callback_query")
                 return
             
             # 获取或创建会话
@@ -102,14 +136,23 @@ def require_configured_user(func: Callable) -> Callable:
             })
             
             # 将会话添加到上下文
+            if context.user_data is None:
+                context.user_data = {}  # type: ignore[assignment]
             context.user_data['session'] = session
             
             # 检查用户是否已配置
             from src.managers.user_manager import UserManager
             if not UserManager.is_user_configured(telegram_user.id):
-                await update.message.reply_text(
-                    "您尚未配置Y2A-Auto服务，请使用 /settings 命令进行配置"
-                )
+                if update.message:
+                    await update.message.reply_text(
+                        "您尚未配置Y2A-Auto服务，请使用 /settings 命令进行配置"
+                    )
+                elif update.callback_query:
+                    await update.callback_query.answer(
+                        "您尚未配置Y2A-Auto服务，请使用 /settings 命令进行配置", show_alert=True
+                    )
+                else:
+                    logger.info("用户未配置，但无法通知：既没有 message 也没有 callback_query")
                 return
             
             # 调用原函数
@@ -117,7 +160,12 @@ def require_configured_user(func: Callable) -> Callable:
             
         except Exception as e:
             logger.error(f"配置检查错误: {e}")
-            await update.message.reply_text("❌ 处理请求时出错")
+            if update.message:
+                await update.message.reply_text("❌ 处理请求时出错")
+            elif update.callback_query:
+                await update.callback_query.answer("❌ 处理请求时出错", show_alert=True)
+            else:
+                logger.exception("无法发送错误消息：既没有 message 也没有 callback_query")
     
     return wrapper
 

@@ -28,7 +28,18 @@ class UserManager:
             username = telegram_user.username
             first_name = telegram_user.first_name
             last_name = telegram_user.last_name
-        
+
+        # 确保 telegram_id 为非空且为 int 类型
+        if telegram_id is None:
+            logger.error("无法注册用户：telegram_id 为空")
+            raise ValueError("telegram_id is required to register or lookup a user")
+
+        try:
+            telegram_id = int(telegram_id)
+        except (TypeError, ValueError) as e:
+            logger.error(f"无法注册用户：无效的 telegram_id: {telegram_id!r} ({e})")
+            raise ValueError(f"Invalid telegram_id: {telegram_id!r}") from e
+
         # 检查用户是否已存在
         user = UserRepository.get_by_telegram_id(telegram_id)
         
@@ -79,14 +90,15 @@ class UserManager:
         return config is not None
     
     @staticmethod
-    def save_user_config(user_id: int, y2a_api_url: str, y2a_password: str = None) -> bool:
+    def save_user_config(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None) -> bool:
         """保存用户配置"""
         # 检查是否已有配置
         config = UserConfigRepository.get_by_user_id(user_id)
         
         if config:
-            # 更新现有配置
-            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, y2a_password)
+            # 更新现有配置（如果传入 None，则保留现有密码或使用空字符串以匹配函数签名）
+            password_to_use = y2a_password if y2a_password is not None else (config.y2a_password or "")
+            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, password_to_use)
         else:
             # 创建新配置
             new_config = UserConfig(
@@ -111,7 +123,12 @@ class UserManager:
         if not user:
             return None, None
         
-        config = UserConfigRepository.get_by_user_id(user.id)
+        # 确保 user.id 不是 None，避免将 Optional[int] 传给需要 int 的函数
+        if user.id is None:
+            return user, None
+
+        # user.id is guaranteed not to be None here; cast to int to satisfy static type checkers
+        config = UserConfigRepository.get_by_user_id(int(user.id))
         return user, config
     
     @staticmethod
@@ -121,13 +138,21 @@ class UserManager:
         if not user:
             return False
         
-        config = UserConfigRepository.get_by_user_id(user.id)
-        return config is not None and config.y2a_api_url
+        # Ensure user.id is not None before calling repository (avoid passing Optional[int])
+        if user.id is None:
+            return False
+
+        config = UserConfigRepository.get_by_user_id(int(user.id))
+        return bool(config and config.y2a_api_url)
     
     @staticmethod
     async def ensure_user_registered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> User:
         """确保用户已注册，如果未注册则自动注册"""
         telegram_user = update.effective_user
+        if telegram_user is None:
+            logger.error("无法注册/更新用户活动：update.effective_user 为 None")
+            raise ValueError("update.effective_user is required to register or update a user")
+
         user = UserManager.register_user(telegram_user)
         
         # 更新用户活动时间
@@ -136,7 +161,7 @@ class UserManager:
         return user
     
     @staticmethod
-    def format_user_info(user: User, config: UserConfig = None) -> str:
+    def format_user_info(user: User, config: Optional[UserConfig] = None) -> str:
         """格式化用户信息"""
         info = f"用户ID: {user.telegram_id}\n"
         info += f"用户名: @{user.username if user.username else '未设置'}\n"
@@ -226,8 +251,9 @@ class UserManager:
         if not guide:
             return None
         
-        # 标记当前步骤为已完成
-        guide.mark_step_completed(guide.current_step)
+        # 标记当前步骤为已完成（仅在 current_step 非 None 时调用）
+        if guide.current_step is not None:
+            guide.mark_step_completed(guide.current_step)
         
         # 获取下一步骤
         next_step = guide.get_next_step()

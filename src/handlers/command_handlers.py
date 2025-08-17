@@ -44,19 +44,31 @@ class CommandHandlers:
         """处理/start命令"""
         user = await UserManager.ensure_user_registered(update, context)
         safe_name = html.escape(user.first_name or "")
-        
+
+        # 安全地获取消息对象以避免 optional member 访问警告
+        effective_message = update.effective_message
+        if effective_message is None:
+            logger.error("start_command: effective_message is None")
+            return
+
+        # 确保 user.id 非 None 再调用需要 int 的函数，避免将 Optional[int] 传递给类型为 int 的参数
+        if user.id is None:
+            await effective_message.reply_text("❌ 用户信息不完整，无法处理请求")
+            return
+        user_id = int(user.id)
+
         # 检查用户引导状态
-        guide = UserManager.get_user_guide(user.id)
+        guide = UserManager.get_user_guide(user_id)
         
         if not guide:
             # 新用户，创建引导记录并开始引导
-            guide = UserManager.ensure_user_guide(user.id)
+            guide = UserManager.ensure_user_guide(user_id)
             await GuideManager.start_guide(update, context)
             return
         elif guide.is_completed:
             # 已完成引导的用户
             from src.database.repository import UserStatsRepository
-            user_stats = UserStatsRepository.get_by_user_id(user.id)
+            user_stats = UserStatsRepository.get_by_user_id(user_id)
 
             total_forwards = user_stats.total_forwards if user_stats else 0
             success_rate = getattr(user_stats, "success_rate", None)
@@ -75,7 +87,7 @@ class CommandHandlers:
 • /settings - 修改配置
 • /help - 查看帮助
 """
-            await update.message.reply_text(welcome_text)
+            await effective_message.reply_text(welcome_text)
         elif guide.is_skipped:
             # 跳过引导的用户
             welcome_text = f"""
@@ -88,7 +100,7 @@ class CommandHandlers:
 • /settings - 直接进行配置
 • /help - 查看帮助信息
 """
-            await update.message.reply_text(welcome_text)
+            await effective_message.reply_text(welcome_text)
         else:
             # 未完成引导的用户，继续引导
             await GuideManager._continue_guide(update, context, user, guide)
@@ -98,55 +110,77 @@ class CommandHandlers:
         """处理/help命令"""
         await UserManager.ensure_user_registered(update, context)
         from src.managers.forward_manager import ForwardManager
-        await update.effective_message.reply_text(HELP_TEXT, reply_markup=ForwardManager.main_menu_markup(include_example=True))
+        effective_message = update.effective_message
+        if effective_message is None:
+            logger.error("help_command: effective_message is None")
+            return
+        await effective_message.reply_text(HELP_TEXT, reply_markup=ForwardManager.main_menu_markup(include_example=True))
     
     @staticmethod
     async def admin_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理/admin_users命令"""
         user = await UserManager.ensure_user_registered(update, context)
-        
-        # 检查管理员权限
-        if not AdminManager.is_admin(user.telegram_id):
-            await update.message.reply_text("❌ 您没有权限执行此命令")
+        effective_message = update.effective_message
+        if effective_message is None:
+            logger.error("admin_users_command: effective_message is None")
             return
-        
+        # 检查管理员权限（确保 telegram_id 非 None）
+        if user.telegram_id is None:
+            await effective_message.reply_text("❌ 用户信息不完整，无法判断权限")
+            return
+        if not AdminManager.is_admin(int(user.telegram_id)):
+            await effective_message.reply_text("❌ 您没有权限执行此命令")
+            return
+
         # 获取所有用户信息
         users_data = AdminManager.get_all_users_with_config_and_stats()
-        
+
         # 格式化并发送用户列表
         user_list_text = AdminManager.format_user_list(users_data)
-        await update.message.reply_text(user_list_text)
+        await effective_message.reply_text(user_list_text)
     
     @staticmethod
     async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理/admin_stats命令"""
         user = await UserManager.ensure_user_registered(update, context)
-        
-        # 检查管理员权限
-        if not AdminManager.is_admin(user.telegram_id):
-            await update.message.reply_text("❌ 您没有权限执行此命令")
+        effective_message = update.effective_message
+        if effective_message is None:
+            logger.error("admin_stats_command: effective_message is None")
             return
-        
+        # 检查管理员权限（确保 telegram_id 非 None）
+        if user.telegram_id is None:
+            await effective_message.reply_text("❌ 用户信息不完整，无法判断权限")
+            return
+        if not AdminManager.is_admin(int(user.telegram_id)):
+            await effective_message.reply_text("❌ 您没有权限执行此命令")
+            return
+
         # 获取系统统计信息
         stats = AdminManager.get_system_stats()
-        
+
         # 格式化并发送统计信息
         stats_text = AdminManager.format_system_stats(stats)
-        await update.message.reply_text(stats_text)
+        await effective_message.reply_text(stats_text)
     
     @staticmethod
     async def admin_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理/admin_user命令"""
         user = await UserManager.ensure_user_registered(update, context)
-        
-        # 检查管理员权限
-        if not AdminManager.is_admin(user.telegram_id):
-            await update.message.reply_text("❌ 您没有权限执行此命令")
+        effective_message = update.effective_message
+        if effective_message is None:
+            logger.error("admin_user_command: effective_message is None")
+            return
+        # 检查管理员权限（确保 telegram_id 非 None）
+        if user.telegram_id is None:
+            await effective_message.reply_text("❌ 用户信息不完整，无法判断权限")
+            return
+        if not AdminManager.is_admin(int(user.telegram_id)):
+            await effective_message.reply_text("❌ 您没有权限执行此命令")
             return
         
         # 检查是否提供了用户ID参数
         if not context.args:
-            await update.message.reply_text("❌ 请提供用户ID，例如：/admin_user 123456789")
+            await effective_message.reply_text("❌ 请提供用户ID，例如：/admin_user 123456789")
             return
         
         try:
@@ -157,18 +191,18 @@ class CommandHandlers:
             user_data = AdminManager.get_user_with_config_and_stats(target_user_id)
             
             if not user_data:
-                await update.message.reply_text("❌ 未找到指定用户")
+                await effective_message.reply_text("❌ 未找到指定用户")
                 return
             
             # 格式化并发送用户详细信息
             user_detail_text = AdminManager.format_user_detail(user_data)
-            await update.message.reply_text(user_detail_text)
+            await effective_message.reply_text(user_detail_text)
             
         except ValueError:
-            await update.message.reply_text("❌ 用户ID必须是数字")
+            await effective_message.reply_text("❌ 用户ID必须是数字")
         except Exception as e:
             logger.error(f"处理/admin_user命令时出错: {e}")
-            await update.message.reply_text("❌ 处理命令时出错")
+            await effective_message.reply_text("❌ 处理命令时出错")
     
     @staticmethod
     async def clear_reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -177,12 +211,17 @@ class CommandHandlers:
         机器人会尝试删除被回复的那条消息，从而清理输入框的固定回复提示。
         """
         await UserManager.ensure_user_registered(update, context)
-        msg = update.message
+        # 使用 effective_message 作为回退，避免 update.message 可能为 None
+        msg = update.message or update.effective_message
+        if msg is None:
+            logger.error("clear_reply_command: no message available to operate on")
+            return
         target = getattr(msg, "reply_to_message", None)
 
         if target and getattr(target.from_user, "is_bot", False):
             try:
-                await context.bot.delete_message(chat_id=msg.chat_id, message_id=target.message_id)
+                # 使用 msg.chat.id 确保静态类型检查通过
+                await context.bot.delete_message(chat_id=msg.chat.id, message_id=target.message_id)
                 await msg.reply_text("✅ 已清除强制回复提示。若仍看到提示，请关闭并重新打开聊天试试。")
                 return
             except Exception as e:

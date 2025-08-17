@@ -39,8 +39,8 @@ class AdminManager:
         if not user:
             return {}
         
-        config = UserConfigRepository.get_by_user_id(user.id)
-        stats = UserStatsRepository.get_by_user_id(user.id)
+        config = UserConfigRepository.get_by_user_id(user.id) if user.id is not None else None
+        stats = UserStatsRepository.get_by_user_id(user.id) if user.id is not None else None
         
         return {
             'user': user,
@@ -55,8 +55,8 @@ class AdminManager:
         result = []
         
         for user in users:
-            config = UserConfigRepository.get_by_user_id(user.id)
-            stats = UserStatsRepository.get_by_user_id(user.id)
+            config = UserConfigRepository.get_by_user_id(user.id) if user.id is not None else None
+            stats = UserStatsRepository.get_by_user_id(user.id) if user.id is not None else None
             
             result.append({
                 'user': user,
@@ -87,7 +87,7 @@ class AdminManager:
         
         # 计算已配置用户数
         for user in users:
-            config = UserConfigRepository.get_by_user_id(user.id)
+            config = UserConfigRepository.get_by_user_id(user.id) if user.id is not None else None
             if config and config.y2a_api_url:
                 configured_users += 1
         

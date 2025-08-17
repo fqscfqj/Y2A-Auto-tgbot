@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class BotError(Exception):
     """机器人基础异常类"""
-    def __init__(self, message: str, user_message: str = None):
+    def __init__(self, message: str, user_message: Optional[str] = None):
         self.message = message
         self.user_message = user_message or "操作失败，请稍后重试"
         super().__init__(self.message)
@@ -127,12 +127,15 @@ class ErrorHandler:
         raise DatabaseError(operation) from error
     
     @staticmethod
-    def handle_api_error(url: str, status_code: int, response: str, error: Exception = None) -> None:
+    def handle_api_error(url: str, status_code: int, response: str, error: Optional[Exception] = None) -> None:
         """处理API错误"""
         error_msg = error or Exception(f"API调用失败: {url}")
         bot_logger.log_error(error_msg, f"API URL: {url}, Status: {status_code}")
         logger.error(f"API调用失败: {url}, 状态码: {status_code}, 响应: {response}")
-        raise APIError(url, status_code, response) from error
+        if error is not None:
+            raise APIError(url, status_code, response) from error
+        else:
+            raise APIError(url, status_code, response)
     
     @staticmethod
     def handle_forward_error(user_id: int, youtube_url: str, error: Exception) -> None:

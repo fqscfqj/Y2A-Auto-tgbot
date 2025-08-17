@@ -82,7 +82,8 @@ class ForwardManager:
     def parse_api_url(url: str) -> str:
         """解析API URL，提取Basic Auth信息，返回净化url"""
         parsed = urlparse(url)
-        netloc = parsed.hostname
+        # 确保 netloc 为字符串，避免与 None 拼接导致类型错误
+        netloc = parsed.hostname or ""
         if parsed.port:
             netloc += f':{parsed.port}'
         # 只替换netloc，不传username和password
@@ -96,7 +97,7 @@ class ForwardManager:
         return session
     
     @staticmethod
-    def try_login(session: requests.Session, y2a_api_url: str, y2a_password: str) -> bool:
+    def try_login(session: requests.Session, y2a_api_url: str, y2a_password: Optional[str]) -> bool:
         """如有密码，尝试登录获取session cookie"""
         if not y2a_password:
             return False
@@ -111,6 +112,25 @@ class ForwardManager:
         except Exception as e:
             logger.error(f'Y2A-Auto登录异常: {e}')
         return False
+
+    @staticmethod
+    async def _safe_send(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+        """安全地发送消息：优先使用 message.reply_text，其次使用 bot.send_message，最后尝试回答 callback_query。"""
+        message_obj = getattr(update, "effective_message", None) or getattr(update, "message", None)
+        if message_obj is not None:
+            await message_obj.reply_text(text, reply_markup=reply_markup)
+            return
+
+        callback = getattr(update, 'callback_query', None)
+        chat = getattr(update, 'effective_chat', None)
+        chat_id = getattr(chat, 'id', None)
+        if chat_id is not None:
+            await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+            return
+
+        if callback is not None:
+            # fallback: answer the callback (shows a popup) if no chat available
+            await callback.answer(text)
     
     @staticmethod
     async def forward_youtube_url(update: Update, context: ContextTypes.DEFAULT_TYPE, youtube_url: str) -> None:
@@ -118,23 +138,34 @@ class ForwardManager:
         user = await UserManager.ensure_user_registered(update, context)
         
         # 检查用户是否已配置
+        # 确保传入的 telegram_id 不为 None，以满足 is_user_configured 的类型要求
+        if user.telegram_id is None:
+            await ForwardManager._safe_send(update, context, "无法识别您的 Telegram ID，请重新发送 /start 以完成注册。")
+            return
+
         if not UserManager.is_user_configured(user.telegram_id):
             # 检查用户引导状态
-            guide = UserManager.get_user_guide(user.id)
+            user_id = user.id
+            guide = None
+            if user_id is not None:
+                guide = UserManager.get_user_guide(user_id)
             
             if guide and not guide.is_completed and not guide.is_skipped:
                 # 用户正在引导过程中，提示继续引导
-                message = update.effective_message
-                await message.reply_text(
+                message = update.effective_message or update.message
+                await ForwardManager._safe_send(
+                    update,
+                    context,
                     "您尚未完成配置。请继续引导流程完成配置，或点击下方按钮打开设置。",
-                    reply_markup=ForwardManager.main_menu_markup()
+                    reply_markup=ForwardManager.main_menu_markup(),
                 )
             else:
                 # 用户未开始引导或已跳过引导
-                message = update.effective_message
-                await message.reply_text(
+                await ForwardManager._safe_send(
+                    update,
+                    context,
                     "您尚未配置Y2A-Auto服务。可点击下方按钮开始引导或进入设置：",
-                    reply_markup=ForwardManager.main_menu_markup()
+                    reply_markup=ForwardManager.main_menu_markup(),
                 )
             return
         
@@ -142,16 +173,17 @@ class ForwardManager:
         user_data = UserManager.get_user_with_config(user.telegram_id)
         config = user_data[1]
         
-        if not config or not config.y2a_api_url:
-            await update.message.reply_text(
-                "您的Y2A-Auto配置不完整，请使用 /settings 命令重新配置"
-            )
+        if not config or not getattr(config, 'y2a_api_url', None):
+            await ForwardManager._safe_send(update, context, "您的Y2A-Auto配置不完整，请使用 /settings 命令重新配置")
             return
         
-        # 发送正在转发的消息
-        message = update.effective_message
-        await message.reply_text('检测到YouTube链接，正在转发到Y2A-Auto...')
-        
+        # 发送正在转发的消息（安全访问 message）
+        message_obj = getattr(update, "effective_message", None) or getattr(update, "message", None)
+        if message_obj is not None:
+            await message_obj.reply_text('检测到YouTube链接，正在转发到Y2A-Auto...')
+        else:
+            await ForwardManager._safe_send(update, context, '检测到YouTube链接，正在转发到Y2A-Auto...')
+
         # 创建转发记录
         forward_record = ForwardRecord(
             user_id=user.id,
@@ -160,51 +192,68 @@ class ForwardManager:
             response_message='',
             created_at=datetime.now()
         )
-        
+
         try:
             # 执行转发
-            success, message = await ForwardManager._execute_forward(youtube_url, config)
-            
+            success, resp_message = await ForwardManager._execute_forward(youtube_url, config)
+
             # 更新转发记录
             forward_record.status = 'success' if success else 'failed'
-            forward_record.response_message = message
+            forward_record.response_message = resp_message
             ForwardRecordRepository.create(forward_record)
-            
-            # 更新用户统计
-            UserStatsRepository.increment_stats(user.id, success)
-            
-            # 发送结果消息
-            if success:
-                await update.effective_message.reply_text(f"✅ 转发成功：{message}")
+
+            # 更新用户统计（仅当 user.id 可用时）
+            if user.id is not None:
+                UserStatsRepository.increment_stats(user.id, success)
             else:
-                await update.effective_message.reply_text(f"❌ 转发失败：{message}")
-        
+                logger.warning("无法更新用户统计：user.id 为 None")
+
+            # 发送结果消息
+            text = f"✅ 转发成功：{resp_message}" if success else f"❌ 转发失败：{resp_message}"
+            if message_obj is not None:
+                await message_obj.reply_text(text)
+            else:
+                await ForwardManager._safe_send(update, context, text)
+
         except Exception as e:
-            logger.error(f"转发异常: {e}")
-            
-            # 更新转发记录
+            # 记录异常并更新转发记录与统计
+            logger.exception("转发异常: %s", e)
             forward_record.status = 'failed'
             forward_record.response_message = str(e)
             ForwardRecordRepository.create(forward_record)
-            
-            # 更新用户统计
-            UserStatsRepository.increment_stats(user.id, False)
-            
-            await update.effective_message.reply_text(f"❌ 转发异常：{e}")
+
+            if user.id is not None:
+                UserStatsRepository.increment_stats(user.id, False)
+            else:
+                logger.warning("无法更新用户统计：user.id 为 None")
+
+            err_text = f"❌ 转发异常：{e}"
+            if message_obj is not None:
+                await message_obj.reply_text(err_text)
+            else:
+                await ForwardManager._safe_send(update, context, err_text)
     
     @staticmethod
     async def _execute_forward(youtube_url: str, config: UserConfig) -> tuple[bool, str]:
         """执行转发操作"""
         session = ForwardManager.get_session()
-        clean_url = ForwardManager.parse_api_url(config.y2a_api_url)
+        # 确保配置完整
+        if not config or not getattr(config, 'y2a_api_url', None):
+            return False, "Y2A-Auto API 地址未配置"
+        # parse_api_url 需要 str，确保 y2a_api_url 非空字符串
+        api_url = config.y2a_api_url
+        if api_url is None:
+            return False, "Y2A-Auto API 地址未配置"
+        clean_url = ForwardManager.parse_api_url(api_url)
         
         try:
             resp = session.post(clean_url, json={'youtube_url': youtube_url}, timeout=10)
             
             # 如果需要登录且配置了密码
-            if resp.status_code == 401 and config.y2a_password:
-                # 尝试登录后重试
-                if ForwardManager.try_login(session, config.y2a_api_url, config.y2a_password):
+            if resp.status_code == 401 and getattr(config, 'y2a_password', None):
+                # 尝试登录后重试（确保 api_url 非空）
+                api_url = getattr(config, 'y2a_api_url', None)
+                if api_url and ForwardManager.try_login(session, api_url, config.y2a_password):
                     resp = session.post(clean_url, json={'youtube_url': youtube_url}, timeout=10)
             
             if resp.ok:
@@ -228,70 +277,73 @@ class ForwardManager:
     @staticmethod
     async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理用户消息，检查是否为YouTube链接并转发"""
+        # 确保用户已注册
         user = await UserManager.ensure_user_registered(update, context)
-        text = update.message.text.strip()
-        
+
+        # 安全获取 message 文本
+        message_obj = getattr(update, "effective_message", None) or getattr(update, "message", None)
+        raw_text = None
+        if message_obj is not None:
+            raw_text = getattr(message_obj, 'text', None)
+        text = (raw_text or "").strip()
+
         # 优先处理设置流程：如果用户在设置 API/密码的状态中，应将文本视为输入而非当作链接
-        from src.managers.settings_manager import SettingsState
-        user_data = context.user_data
-        # ConversationHandler 通常管理状态在内部，这里额外根据提示语与最近动作进行兜底判断：
-        pending_input = user_data.get("pending_input")
-        if pending_input in ("set_api", "set_password"):
-            # 兜底处理：若当前不是由 ConversationHandler 接管（例如通过主菜单按钮进入设置），
-            # 则直接调用对应的设置处理函数完成保存，避免用户输入被当作普通消息忽略。
-            try:
-                from src.managers.settings_manager import SettingsManager
+        try:
+            from src.managers.settings_manager import SettingsState, SettingsManager
+            user_data = context.user_data or {}
+            pending_input = user_data.get("pending_input")
+            if pending_input in ("set_api", "set_password"):
                 if pending_input == "set_api":
                     await SettingsManager._set_api_url_end(update, context)
                 elif pending_input == "set_password":
                     await SettingsManager._set_password_end(update, context)
-            finally:
-                # 无论是否成功，均停止后续作为普通消息的处理
                 return
+        except Exception:
+            # 不要阻塞正常流程
+            logger.debug("settings fallback handling failed", exc_info=True)
 
-        # 兜底处理引导流程：若用户正处于引导步骤中的“配置 API/密码”，
-        # 且当前并非由 ConversationHandler 接管（例如通过主菜单按钮进入引导），
-        # 则将本次文本输入交给引导的对应处理函数，避免用户感觉“卡住”。
+        # 引导流程处理（兜底）
         try:
             from src.database.models import GuideStep
-            guide = UserManager.get_user_guide(user.id)
+            user_id = getattr(user, 'id', None)
+            guide = None
+            if user_id is not None:
+                guide = UserManager.get_user_guide(user_id)
             if guide and not guide.is_completed and not guide.is_skipped:
+                from src.managers.guide_manager import GuideManager
                 if guide.current_step == GuideStep.CONFIG_API.value:
-                    from src.managers.guide_manager import GuideManager
                     await GuideManager.handle_api_input(update, context)
                     return
                 if guide.current_step == GuideStep.CONFIG_PASSWORD.value:
-                    from src.managers.guide_manager import GuideManager
                     await GuideManager.handle_password_input(update, context)
                     return
-        except Exception as _:
-            # 兜底逻辑不应影响正常流程，忽略异常
-            pass
+        except Exception:
+            logger.debug("guide fallback handling failed", exc_info=True)
 
-        if ForwardManager.is_youtube_url(text):
-            await ForwardManager.forward_youtube_url(update, context, text)
-        else:
-            # 检查用户引导状态
-            guide = UserManager.get_user_guide(user.id)
-            
-            if guide and not guide.is_completed and not guide.is_skipped:
-                # 用户正在引导过程中，提示继续引导
-                await update.effective_message.reply_text(
-                    '请发送有效的YouTube视频或播放列表链接。\n\n您也可以点击下方按钮继续引导或打开设置。',
-                    reply_markup=ForwardManager.main_menu_markup()
-                )
+        # 若不是 YouTube 链接，提示用户
+        if not text or not ForwardManager.is_youtube_url(text):
+            reply_markup = ForwardManager.main_menu_markup(include_example=True)
+            prompt = (
+                '请发送有效的YouTube视频或播放列表链接。\n\n也可以使用下方快捷操作：'
+            )
+            if message_obj is not None:
+                await message_obj.reply_text(prompt, reply_markup=reply_markup)
             else:
-                # 提供命令提示
-                await update.effective_message.reply_text(
-                    '请发送有效的YouTube视频或播放列表链接。\n\n也可以使用下方快捷操作：',
-                    reply_markup=ForwardManager.main_menu_markup(include_example=True)
-                )
+                await ForwardManager._safe_send(update, context, prompt, reply_markup=reply_markup)
+            return
+
+        # 是 YouTube 链接，执行转发
+        await ForwardManager.forward_youtube_url(update, context, text)
     
     @staticmethod
     async def test_connection(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, config: UserConfig) -> str:
         """测试Y2A-Auto连接"""
         session = ForwardManager.get_session()
-        clean_url = ForwardManager.parse_api_url(config.y2a_api_url)
+        # 确保配置中包含可用的 api_url
+        api_url = getattr(config, 'y2a_api_url', None)
+        if not api_url:
+            return "❌ Y2A-Auto API 地址未配置"
+        clean_url = ForwardManager.parse_api_url(api_url)
 
         def try_get(url: str, verify: bool | None = None):
             try:
@@ -304,7 +356,7 @@ class ForwardManager:
                 return None, e
 
         # 1) 首选访问 /login（最轻量且不改动数据）
-        login_url = config.y2a_api_url.replace('/tasks/add_via_extension', '/login')
+        login_url = api_url.replace('/tasks/add_via_extension', '/login')
 
         # 1.1 正常证书校验
         resp, err = try_get(login_url, verify=None)
@@ -322,7 +374,7 @@ class ForwardManager:
             # 能连上服务器
             if resp.status_code == 200:
                 if config.y2a_password:
-                    if ForwardManager.try_login(session, config.y2a_api_url, config.y2a_password):
+                    if ForwardManager.try_login(session, api_url, config.y2a_password):
                         return "✅ 连接成功，登录成功"
                     return "⚠️ 连接成功，但登录失败，请检查密码"
                 return "✅ 连接成功"
@@ -354,15 +406,25 @@ class ForwardManager:
         from src.handlers.command_handlers import HELP_TEXT
         markup = ForwardManager.main_menu_markup(include_example=True)
         if update.callback_query:
-            await update.callback_query.edit_message_text(HELP_TEXT, reply_markup=markup)
+            # try to edit the callback message
+            try:
+                await update.callback_query.edit_message_text(HELP_TEXT, reply_markup=markup)
+            except Exception:
+                await ForwardManager._safe_send(update, context, HELP_TEXT, reply_markup=markup)
         else:
-            await update.effective_message.reply_text(HELP_TEXT, reply_markup=markup)
+            await ForwardManager._safe_send(update, context, HELP_TEXT, reply_markup=markup)
     
     @staticmethod
     async def handle_start_guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理开始引导命令"""
         from src.managers.guide_manager import GuideManager
         user = await UserManager.ensure_user_registered(update, context)
+        if user.id is None:
+            # 如果无法获取 user.id，提示用户重新注册并终止操作，避免将 None 传入只接受 int 的函数
+            msg = "无法识别您的用户ID，请重新发送 /start 以完成注册。"
+            # 使用安全发送函数
+            await ForwardManager._safe_send(update, context, msg)
+            return
         guide = UserManager.ensure_user_guide(user.id)
         await GuideManager._continue_guide(update, context, user, guide)
     

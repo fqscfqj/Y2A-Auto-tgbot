@@ -148,7 +148,7 @@ class UserConfigRepository:
         return rows_affected > 0
     
     @staticmethod
-    def update_by_user_id(user_id: int, y2a_api_url: str, y2a_password: str = None) -> bool:
+    def update_by_user_id(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None) -> bool:
         """通过用户ID更新配置"""
         query = """
         UPDATE user_configs SET
@@ -366,8 +366,8 @@ class UserGuideRepository:
         return rows_affected > 0
     
     @staticmethod
-    def update_by_user_id(user_id: int, current_step: str = None, completed_steps: str = None,
-                         is_completed: bool = None, is_skipped: bool = None) -> bool:
+    def update_by_user_id(user_id: int, current_step: Optional[str] = None, completed_steps: Optional[str] = None,
+                         is_completed: Optional[bool] = None, is_skipped: Optional[bool] = None) -> bool:
         """通过用户ID更新引导信息"""
         # 构建动态更新语句
         update_fields = []

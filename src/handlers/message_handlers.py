@@ -17,7 +17,13 @@ class MessageHandlers:
             await ForwardManager.handle_message(update, context)
         except Exception as e:
             logger.error(f"处理文本消息时出错: {e}")
-            await update.message.reply_text("❌ 处理消息时出错，请稍后重试")
+            # update.message can be None according to type hints; check before calling reply_text
+            message = update.message
+            if message:
+                await message.reply_text("❌ 处理消息时出错，请稍后重试")
+            else:
+                # 如果没有 message，记录无法回复的情况（保持原有行为的安全性）
+                logger.error("无法发送错误通知：update.message 为 None")
     
     @staticmethod
     def get_message_handler() -> MessageHandler:

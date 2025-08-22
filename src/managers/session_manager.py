@@ -36,8 +36,10 @@ class SessionManager:
     
     def __init__(self):
         self._sessions: Dict[int, UserSession] = {}
-        self._cleanup_interval = 3600  # 1小时清理一次过期会话
+        self._cleanup_interval = 300  # 5分钟清理一次过期会话 (从1小时改为5分钟)
         self._last_cleanup = time.time()
+        self._max_sessions = 1000  # 最大会话数限制
+        self._session_timeout_hours = 12  # 会话超时时间减少到12小时 (从24小时)
     
     def _get_field(self, obj: Any, name: str):
         """从 dict 或对象安全地读取字段（支持 attribute 或 key）。"""
@@ -47,6 +49,9 @@ class SessionManager:
 
     def get_or_create_session(self, telegram_user: Any) -> UserSession:
         """获取或创建用户会话"""
+        # 首先清理过期会话
+        self.cleanup_expired_sessions()
+        
         telegram_id_raw = self._get_field(telegram_user, 'id')
         if telegram_id_raw is None:
             logger.error("无法获取 telegram_id，telegram_user 缺少 id 字段")
@@ -64,12 +69,22 @@ class SessionManager:
             session.update_activity()
             
             # 检查会话是否过期
-            if session.is_expired():
+            if session.is_expired(self._session_timeout_hours):
                 logger.info(f"用户 {telegram_id} 的会话已过期，创建新会话")
                 self._sessions.pop(telegram_id)
                 return self._create_new_session(telegram_user)
             
             return session
+
+        # 检查会话数是否超过限制
+        if len(self._sessions) >= self._max_sessions:
+            logger.warning(f"会话数达到上限 {self._max_sessions}，强制清理")
+            self.cleanup_expired_sessions()
+            
+            # 如果清理后仍然超过限制，拒绝创建新会话
+            if len(self._sessions) >= self._max_sessions:
+                logger.error(f"无法创建新会话，已达到最大会话数限制 {self._max_sessions}")
+                raise RuntimeError("服务器繁忙，请稍后再试")
 
         # 创建新会话
         return self._create_new_session(telegram_user)
@@ -120,11 +135,14 @@ class SessionManager:
 
     def get_session(self, telegram_id: int) -> Optional[UserSession]:
         """获取用户会话"""
+        # 首先清理过期会话
+        self.cleanup_expired_sessions()
+        
         if telegram_id in self._sessions:
             session = self._sessions[telegram_id]
             
             # 检查会话是否过期
-            if session.is_expired():
+            if session.is_expired(self._session_timeout_hours):
                 logger.info(f"用户 {telegram_id} 的会话已过期")
                 self._sessions.pop(telegram_id)
                 return None
@@ -152,13 +170,26 @@ class SessionManager:
         
         expired_sessions = []
         for telegram_id, session in list(self._sessions.items()):
-            if session.is_expired():
+            if session.is_expired(self._session_timeout_hours):
                 expired_sessions.append(telegram_id)
         
         # 移除过期会话
         for telegram_id in expired_sessions:
             self._sessions.pop(telegram_id, None)
             logger.info(f"清理过期会话: {telegram_id}")
+        
+        # 如果会话数超过限制，移除最旧的会话
+        if len(self._sessions) > self._max_sessions:
+            # 按最后活动时间排序，移除最旧的会话
+            sorted_sessions = sorted(
+                self._sessions.items(), 
+                key=lambda x: x[1].last_activity
+            )
+            excess_count = len(self._sessions) - self._max_sessions
+            for i in range(excess_count):
+                telegram_id = sorted_sessions[i][0]
+                self._sessions.pop(telegram_id, None)
+                logger.warning(f"清理超出限制的会话: {telegram_id}")
         
         if expired_sessions:
             logger.info(f"清理了 {len(expired_sessions)} 个过期会话")

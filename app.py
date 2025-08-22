@@ -19,6 +19,7 @@ from src.database.db import init_database
 from src.database.migration_manager import MigrationManager
 from src.handlers.command_handlers import CommandHandlers
 from src.handlers.message_handlers import MessageHandlers
+from src.utils.memory_monitor import init_memory_monitor, memory_monitor
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -38,6 +39,10 @@ def main():
         else:
             logger.error("数据库迁移失败")
             sys.exit(1)
+        
+        # 初始化内存监控
+        logger.info("初始化内存监控...")
+        init_memory_monitor()
         
         # 创建Telegram应用
         logger.info("创建Telegram应用...")
@@ -98,6 +103,8 @@ def main():
         
     except KeyboardInterrupt:
         logger.info("收到中断信号，正在关闭Bot...")
+        # 停止内存监控
+        memory_monitor.stop_monitoring()
     except Exception as e:
         logger.error(f"启动Bot时出错: {e}")
         sys.exit(1)

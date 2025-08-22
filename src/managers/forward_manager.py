@@ -4,6 +4,11 @@ import requests
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse, urlunparse
 from datetime import datetime
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import time
+import threading
+from collections import defaultdict
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
@@ -11,11 +16,75 @@ from telegram.ext import ContextTypes, CallbackQueryHandler
 from src.managers.user_manager import UserManager
 from src.database.models import User, UserConfig, ForwardRecord
 from src.database.repository import ForwardRecordRepository, UserStatsRepository
+from src.utils.resource_manager import OperationContext, resource_manager
 
 logger = logging.getLogger(__name__)
 
+class RateLimiter:
+    """简单的速率限制器"""
+    
+    def __init__(self, max_requests: int = 10, time_window: int = 60):
+        self.max_requests = max_requests
+        self.time_window = time_window
+        self.requests = defaultdict(list)
+        self.lock = threading.Lock()
+    
+    def is_allowed(self, key: str) -> bool:
+        """检查是否允许请求"""
+        current_time = time.time()
+        
+        with self.lock:
+            # 清理过期的请求记录
+            self.requests[key] = [
+                req_time for req_time in self.requests[key]
+                if current_time - req_time < self.time_window
+            ]
+            
+            # 检查是否超过限制
+            if len(self.requests[key]) >= self.max_requests:
+                return False
+            
+            # 记录新请求
+            self.requests[key].append(current_time)
+            return True
+
 class ForwardManager:
     """转发管理器，负责处理YouTube链接的转发逻辑"""
+    
+    # 全局HTTP会话实例，支持连接池
+    _http_session: Optional[requests.Session] = None
+    # 速率限制器
+    _rate_limiter = RateLimiter(max_requests=30, time_window=60)  # 每分钟最多30个请求
+    
+    @classmethod
+    def _get_http_session(cls) -> requests.Session:
+        """获取全局HTTP会话实例，支持连接池和重试机制"""
+        if cls._http_session is None:
+            cls._http_session = requests.Session()
+            
+            # 配置重试策略
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
+            )
+            
+            # 配置HTTP适配器
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,  # 连接池大小
+                pool_maxsize=20,      # 最大连接数
+                pool_block=False      # 非阻塞模式
+            )
+            
+            cls._http_session.mount("http://", adapter)
+            cls._http_session.mount("https://", adapter)
+            
+            # 设置默认超时
+            cls._http_session.timeout = 10
+            
+        return cls._http_session
     @staticmethod
     def normalize_api_url(input_url: str) -> str:
         """规范化用户输入的 API 地址。
@@ -93,8 +162,7 @@ class ForwardManager:
     @staticmethod
     def get_session() -> requests.Session:
         """返回预配置的 requests.Session。"""
-        session = requests.Session()
-        return session
+        return ForwardManager._get_http_session()
     
     @staticmethod
     def try_login(session: requests.Session, y2a_api_url: str, y2a_password: Optional[str]) -> bool:
@@ -143,6 +211,36 @@ class ForwardManager:
             await ForwardManager._safe_send(update, context, "无法识别您的 Telegram ID，请重新发送 /start 以完成注册。")
             return
 
+        # 检查服务器是否过载
+        if resource_manager.is_overloaded():
+            await ForwardManager._safe_send(
+                update, 
+                context, 
+                "服务器当前负载较高，请稍后再试。"
+            )
+            return
+
+        # 速率限制检查
+        user_key = f"user_{user.telegram_id}"
+        if not ForwardManager._rate_limiter.is_allowed(user_key):
+            await ForwardManager._safe_send(
+                update, 
+                context, 
+                "请求过于频繁，请稍后再试。为了服务器稳定性，每分钟最多允许30个请求。"
+            )
+            return
+
+        # 使用资源管理器进行操作
+        try:
+            with OperationContext(user_id=user.telegram_id, operation_name="forward_youtube"):
+                await ForwardManager._forward_youtube_internal(update, context, youtube_url, user)
+        except RuntimeError as e:
+            await ForwardManager._safe_send(update, context, f"服务器繁忙: {str(e)}")
+            return
+
+    @staticmethod 
+    async def _forward_youtube_internal(update: Update, context: ContextTypes.DEFAULT_TYPE, youtube_url: str, user: User) -> None:
+        """内部转发逻辑，已在资源管理器保护下"""
         if not UserManager.is_user_configured(user.telegram_id):
             # 检查用户引导状态
             user_id = user.id

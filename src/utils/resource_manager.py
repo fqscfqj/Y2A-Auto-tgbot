@@ -26,6 +26,16 @@ class ResourceManager:
         self._total_operations = 0
         self._rejected_operations = 0
         self._error_operations = 0
+    
+    def cleanup_inactive_users(self) -> int:
+        """清理没有活跃操作的用户记录，返回清理的用户数"""
+        with self._user_operation_lock:
+            initial_count = len(self._user_operation_count)
+            # 只保留有活跃操作的用户
+            self._user_operation_count = defaultdict(int, {
+                uid: count for uid, count in self._user_operation_count.items() if count > 0
+            })
+            return initial_count - len(self._user_operation_count)
         
     def acquire_operation_slot(self, user_id: Optional[int] = None) -> bool:
         """获取操作槽位"""
@@ -72,7 +82,7 @@ class ResourceManager:
             'total_operations': self._total_operations,
             'rejected_operations': self._rejected_operations,
             'error_operations': self._error_operations,
-            'active_users': len([uid for uid, count in self._user_operation_count.items() if count > 0])
+            'active_users': sum(1 for count in self._user_operation_count.values() if count > 0)
         }
     
     def is_overloaded(self) -> bool:

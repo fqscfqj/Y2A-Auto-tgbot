@@ -173,6 +173,26 @@ class UserConfigRepository:
         query = "DELETE FROM user_configs WHERE user_id = ?"
         rows_affected = execute_update(query, (user_id,))
         return rows_affected > 0
+    
+    @staticmethod
+    def get_by_user_ids(user_ids: List[int]) -> Dict[int, UserConfig]:
+        """批量获取多个用户的配置（优化N+1查询）"""
+        if not user_ids:
+            return {}
+        
+        # 使用 IN 子句批量查询
+        placeholders = ','.join('?' * len(user_ids))
+        query = f"SELECT * FROM user_configs WHERE user_id IN ({placeholders})"
+        results = execute_query(query, tuple(user_ids))
+        
+        # 构建用户ID到配置的映射
+        config_map = {}
+        for row in results:
+            config = UserConfig.from_dict(row)
+            if config.user_id is not None:
+                config_map[config.user_id] = config
+        
+        return config_map
 
 class ForwardRecordRepository:
     """转发记录数据访问层"""
@@ -207,10 +227,12 @@ class ForwardRecordRepository:
         """获取用户最近几天的转发记录"""
         query = """
         SELECT * FROM forward_records 
-        WHERE user_id = ? AND created_at >= datetime('now', '-{} days')
+        WHERE user_id = ? AND created_at >= datetime('now', ?)
         ORDER BY created_at DESC
-        """.format(days)
-        results = execute_query(query, (user_id,))
+        """
+        # Pre-format the days parameter to avoid SQLite expression evaluation per row
+        days_param = f'-{days} days'
+        results = execute_query(query, (user_id, days_param))
         return [ForwardRecord.from_dict(row) for row in results]
 
 class UserStatsRepository:
@@ -277,6 +299,7 @@ class UserStatsRepository:
         """增加用户统计"""
         # 首先检查是否存在统计记录
         stats = UserStatsRepository.get_by_user_id(user_id)
+        now = datetime.now()  # Use consistent timestamp for both creation and update
         
         if not stats:
             # 如果不存在，创建新的统计记录
@@ -285,7 +308,7 @@ class UserStatsRepository:
                 total_forwards=1,
                 successful_forwards=1 if is_successful else 0,
                 failed_forwards=0 if is_successful else 1,
-                last_forward_date=datetime.now()
+                last_forward_date=now
             )
             UserStatsRepository.create(new_stats)
             return True
@@ -296,7 +319,7 @@ class UserStatsRepository:
             stats.successful_forwards += 1
         else:
             stats.failed_forwards += 1
-        stats.last_forward_date = datetime.now()
+        stats.last_forward_date = now
         
         return UserStatsRepository.update(stats)
     
@@ -306,6 +329,26 @@ class UserStatsRepository:
         query = "SELECT * FROM user_stats ORDER BY updated_at DESC"
         results = execute_query(query)
         return [UserStats.from_dict(row) for row in results]
+    
+    @staticmethod
+    def get_by_user_ids(user_ids: List[int]) -> Dict[int, UserStats]:
+        """批量获取多个用户的统计信息（优化N+1查询）"""
+        if not user_ids:
+            return {}
+        
+        # 使用 IN 子句批量查询
+        placeholders = ','.join('?' * len(user_ids))
+        query = f"SELECT * FROM user_stats WHERE user_id IN ({placeholders})"
+        results = execute_query(query, tuple(user_ids))
+        
+        # 构建用户ID到统计的映射
+        stats_map = {}
+        for row in results:
+            stats = UserStats.from_dict(row)
+            if stats.user_id is not None:
+                stats_map[stats.user_id] = stats
+        
+        return stats_map
 
 class UserGuideRepository:
     """用户引导数据访问层"""

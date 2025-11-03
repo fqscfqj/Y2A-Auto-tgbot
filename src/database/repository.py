@@ -173,6 +173,26 @@ class UserConfigRepository:
         query = "DELETE FROM user_configs WHERE user_id = ?"
         rows_affected = execute_update(query, (user_id,))
         return rows_affected > 0
+    
+    @staticmethod
+    def get_by_user_ids(user_ids: List[int]) -> Dict[int, UserConfig]:
+        """批量获取多个用户的配置（优化N+1查询）"""
+        if not user_ids:
+            return {}
+        
+        # 使用 IN 子句批量查询
+        placeholders = ','.join('?' * len(user_ids))
+        query = f"SELECT * FROM user_configs WHERE user_id IN ({placeholders})"
+        results = execute_query(query, tuple(user_ids))
+        
+        # 构建用户ID到配置的映射
+        config_map = {}
+        for row in results:
+            config = UserConfig.from_dict(row)
+            if config.user_id is not None:
+                config_map[config.user_id] = config
+        
+        return config_map
 
 class ForwardRecordRepository:
     """转发记录数据访问层"""
@@ -307,6 +327,26 @@ class UserStatsRepository:
         query = "SELECT * FROM user_stats ORDER BY updated_at DESC"
         results = execute_query(query)
         return [UserStats.from_dict(row) for row in results]
+    
+    @staticmethod
+    def get_by_user_ids(user_ids: List[int]) -> Dict[int, UserStats]:
+        """批量获取多个用户的统计信息（优化N+1查询）"""
+        if not user_ids:
+            return {}
+        
+        # 使用 IN 子句批量查询
+        placeholders = ','.join('?' * len(user_ids))
+        query = f"SELECT * FROM user_stats WHERE user_id IN ({placeholders})"
+        results = execute_query(query, tuple(user_ids))
+        
+        # 构建用户ID到统计的映射
+        stats_map = {}
+        for row in results:
+            stats = UserStats.from_dict(row)
+            if stats.user_id is not None:
+                stats_map[stats.user_id] = stats
+        
+        return stats_map
 
 class UserGuideRepository:
     """用户引导数据访问层"""

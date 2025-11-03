@@ -65,20 +65,9 @@ class AdminManager:
         # 批量获取所有配置和统计信息
         user_ids = [user.id for user in users if user.id is not None]
         
-        # 构建配置和统计的映射字典，避免N+1查询
-        configs_map = {}
-        stats_map = {}
-        
-        # 注意：这里仍然是逐个查询，但可以考虑添加批量查询方法到repository
-        # 暂时保持现有实现，但减少不必要的检查
-        for user_id in user_ids:
-            config = UserConfigRepository.get_by_user_id(user_id)
-            if config:
-                configs_map[user_id] = config
-            
-            stats = UserStatsRepository.get_by_user_id(user_id)
-            if stats:
-                stats_map[user_id] = stats
+        # 使用批量查询方法，避免N+1查询问题
+        configs_map = UserConfigRepository.get_by_user_ids(user_ids)
+        stats_map = UserStatsRepository.get_by_user_ids(user_ids)
         
         # 组装结果
         result = []
@@ -93,7 +82,7 @@ class AdminManager:
     
     @staticmethod
     def get_system_stats() -> Dict[str, Any]:
-        """获取系统统计信息（优化：减少数据库查询）"""
+        """获取系统统计信息（优化：使用批量查询）"""
         users = UserRepository.get_all()
         stats_list = UserStatsRepository.get_all_stats()
         
@@ -107,11 +96,8 @@ class AdminManager:
         
         # 批量获取配置，计算已配置用户数
         user_ids = [user.id for user in users if user.id is not None]
-        configured_users = 0
-        for user_id in user_ids:
-            config = UserConfigRepository.get_by_user_id(user_id)
-            if config and config.y2a_api_url:
-                configured_users += 1
+        configs_map = UserConfigRepository.get_by_user_ids(user_ids)
+        configured_users = sum(1 for config in configs_map.values() if config.y2a_api_url)
         
         # 计算成功率
         success_rate = 0

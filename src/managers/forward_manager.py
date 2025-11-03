@@ -76,12 +76,9 @@ class RateLimiter:
         current_time = time.time()
         
         with self.lock:
-            # 获取该用户的请求记录（如果没有则为空列表）
-            user_requests = self.requests.get(key, [])
-            
-            # 只保留时间窗口内的请求（快速路径 - 只检查不清理所有用户）
+            # 直接过滤并检查时间窗口内的请求
             recent_requests = [
-                req_time for req_time in user_requests
+                req_time for req_time in self.requests.get(key, [])
                 if current_time - req_time < self.time_window
             ]
             

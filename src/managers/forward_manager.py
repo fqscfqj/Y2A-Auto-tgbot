@@ -28,24 +28,70 @@ class RateLimiter:
         self.time_window = time_window
         self.requests = defaultdict(list)
         self.lock = threading.Lock()
+        self._cleanup_thread: Optional[threading.Thread] = None
+        self._cleanup_running = False
+    
+    def start_cleanup(self, interval: int = 30):
+        """启动定期清理线程"""
+        if self._cleanup_running:
+            return
+        
+        self._cleanup_running = True
+        self._cleanup_thread = threading.Thread(target=self._cleanup_loop, args=(interval,), daemon=True)
+        self._cleanup_thread.start()
+        logger.info(f"速率限制器清理线程已启动，清理间隔: {interval}秒")
+    
+    def stop_cleanup(self):
+        """停止清理线程"""
+        self._cleanup_running = False
+        if self._cleanup_thread:
+            self._cleanup_thread.join(timeout=5)
+    
+    def _cleanup_loop(self, interval: int):
+        """清理循环"""
+        while self._cleanup_running:
+            try:
+                self._cleanup_expired_requests()
+                time.sleep(interval)
+            except Exception as e:
+                logger.error(f"速率限制器清理异常: {e}")
+                time.sleep(interval)
+    
+    def _cleanup_expired_requests(self):
+        """清理过期的请求记录"""
+        current_time = time.time()
+        with self.lock:
+            # 清理所有用户的过期请求
+            for key in list(self.requests.keys()):
+                self.requests[key] = [
+                    req_time for req_time in self.requests[key]
+                    if current_time - req_time < self.time_window
+                ]
+                # 如果该用户没有请求了，删除这个key以节省内存
+                if not self.requests[key]:
+                    del self.requests[key]
     
     def is_allowed(self, key: str) -> bool:
         """检查是否允许请求"""
         current_time = time.time()
         
         with self.lock:
-            # 清理过期的请求记录
-            self.requests[key] = [
-                req_time for req_time in self.requests[key]
+            # 获取该用户的请求记录（如果没有则为空列表）
+            user_requests = self.requests.get(key, [])
+            
+            # 只保留时间窗口内的请求（快速路径 - 只检查不清理所有用户）
+            recent_requests = [
+                req_time for req_time in user_requests
                 if current_time - req_time < self.time_window
             ]
             
             # 检查是否超过限制
-            if len(self.requests[key]) >= self.max_requests:
+            if len(recent_requests) >= self.max_requests:
                 return False
             
             # 记录新请求
-            self.requests[key].append(current_time)
+            recent_requests.append(current_time)
+            self.requests[key] = recent_requests
             return True
 
 class ForwardManager:
@@ -55,10 +101,21 @@ class ForwardManager:
     _http_session: Optional[requests.Session] = None
     # 速率限制器
     _rate_limiter = RateLimiter(max_requests=30, time_window=60)  # 每分钟最多30个请求
+    # 标记是否已初始化
+    _initialized = False
+    
+    @classmethod
+    def _ensure_initialized(cls):
+        """确保速率限制器已初始化"""
+        if not cls._initialized:
+            cls._rate_limiter.start_cleanup(interval=60)  # 每60秒清理一次
+            cls._initialized = True
     
     @classmethod
     def _get_http_session(cls) -> requests.Session:
         """获取全局HTTP会话实例，支持连接池和重试机制"""
+        cls._ensure_initialized()  # 确保初始化
+        
         if cls._http_session is None:
             cls._http_session = requests.Session()
             
@@ -80,9 +137,6 @@ class ForwardManager:
             
             cls._http_session.mount("http://", adapter)
             cls._http_session.mount("https://", adapter)
-            
-            # 设置默认超时
-            cls._http_session.timeout = 10
             
         return cls._http_session
     @staticmethod

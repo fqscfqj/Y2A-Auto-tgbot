@@ -207,10 +207,10 @@ class ForwardRecordRepository:
         """获取用户最近几天的转发记录"""
         query = """
         SELECT * FROM forward_records 
-        WHERE user_id = ? AND created_at >= datetime('now', '-{} days')
+        WHERE user_id = ? AND created_at >= datetime('now', ? || ' days')
         ORDER BY created_at DESC
-        """.format(days)
-        results = execute_query(query, (user_id,))
+        """
+        results = execute_query(query, (user_id, f'-{days}'))
         return [ForwardRecord.from_dict(row) for row in results]
 
 class UserStatsRepository:
@@ -277,6 +277,7 @@ class UserStatsRepository:
         """增加用户统计"""
         # 首先检查是否存在统计记录
         stats = UserStatsRepository.get_by_user_id(user_id)
+        now = datetime.now()  # Cache the current time
         
         if not stats:
             # 如果不存在，创建新的统计记录
@@ -285,7 +286,7 @@ class UserStatsRepository:
                 total_forwards=1,
                 successful_forwards=1 if is_successful else 0,
                 failed_forwards=0 if is_successful else 1,
-                last_forward_date=datetime.now()
+                last_forward_date=now
             )
             UserStatsRepository.create(new_stats)
             return True
@@ -296,7 +297,7 @@ class UserStatsRepository:
             stats.successful_forwards += 1
         else:
             stats.failed_forwards += 1
-        stats.last_forward_date = datetime.now()
+        stats.last_forward_date = now
         
         return UserStatsRepository.update(stats)
     

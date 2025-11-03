@@ -163,22 +163,28 @@ class UserManager:
     @staticmethod
     def format_user_info(user: User, config: Optional[UserConfig] = None) -> str:
         """格式化用户信息"""
-        info = f"用户ID: {user.telegram_id}\n"
-        info += f"用户名: @{user.username if user.username else '未设置'}\n"
-        info += f"姓名: {user.first_name or ''} {user.last_name or ''}\n"
-        info += f"状态: {'活跃' if user.is_active else '禁用'}\n"
-        info += f"注册时间: {user.created_at.strftime('%Y-%m-%d %H:%M:%S') if user.created_at else '未知'}\n"
-        info += f"最后活动: {user.last_activity.strftime('%Y-%m-%d %H:%M:%S') if user.last_activity else '未知'}\n"
+        parts = [
+            f"用户ID: {user.telegram_id}",
+            f"用户名: @{user.username if user.username else '未设置'}",
+            f"姓名: {user.first_name or ''} {user.last_name or ''}",
+            f"状态: {'活跃' if user.is_active else '禁用'}",
+            f"注册时间: {user.created_at.strftime('%Y-%m-%d %H:%M:%S') if user.created_at else '未知'}",
+            f"最后活动: {user.last_activity.strftime('%Y-%m-%d %H:%M:%S') if user.last_activity else '未知'}",
+        ]
         
         if config:
-            info += f"\nY2A-Auto配置:\n"
-            info += f"API地址: {config.y2a_api_url}\n"
-            info += f"密码: {'已设置' if config.y2a_password else '未设置'}\n"
-            info += f"配置时间: {config.created_at.strftime('%Y-%m-%d %H:%M:%S') if config.created_at else '未知'}\n"
+            parts.extend([
+                "",  # Empty line
+                "Y2A-Auto配置:",
+                f"API地址: {config.y2a_api_url}",
+                f"密码: {'已设置' if config.y2a_password else '未设置'}",
+                f"配置时间: {config.created_at.strftime('%Y-%m-%d %H:%M:%S') if config.created_at else '未知'}",
+            ])
         else:
-            info += "\nY2A-Auto配置: 未配置"
+            parts.append("")
+            parts.append("Y2A-Auto配置: 未配置")
         
-        return info
+        return "\n".join(parts)
     
     @staticmethod
     def get_user_guide(user_id: int) -> Optional[UserGuide]:

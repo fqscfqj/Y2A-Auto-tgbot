@@ -24,40 +24,64 @@ class DatabasePool:
     
     def get_connection(self) -> sqlite3.Connection:
         """获取数据库连接"""
-        with self._lock:
-            # 尝试从池中获取连接
-            if self._connections:
-                conn = self._connections.pop()
-                # 检查连接是否仍然有效
-                try:
-                    conn.execute("SELECT 1")
+        # Use a timeout-based retry instead of recursion to avoid stack overflow
+        max_retries = 50  # 5 seconds total (50 * 0.1s)
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            with self._lock:
+                # 尝试从池中获取连接
+                if self._connections:
+                    conn = self._connections.pop()
+                    # 检查连接是否仍然有效
+                    try:
+                        conn.execute("SELECT 1")
+                        return conn
+                    except sqlite3.Error:
+                        # 连接无效，关闭并继续创建新连接
+                        try:
+                            conn.close()
+                        except:
+                            pass
+                        self._connection_count -= 1
+                
+                # 创建新连接
+                if self._connection_count < self._max_connections:
+                    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    conn.row_factory = sqlite3.Row
+                    # 设置WAL模式以提高并发性能
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    # 设置更短的超时
+                    conn.execute("PRAGMA busy_timeout=5000")
+                    self._connection_count += 1
                     return conn
-                except sqlite3.Error:
-                    # 连接无效，创建新连接
-                    pass
             
-            # 创建新连接
-            if self._connection_count < self._max_connections:
-                conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-                conn.row_factory = sqlite3.Row
-                # 设置WAL模式以提高并发性能
-                conn.execute("PRAGMA journal_mode=WAL")
-                # 设置更短的超时
-                conn.execute("PRAGMA busy_timeout=5000")
-                self._connection_count += 1
-                return conn
-            else:
-                # 如果达到最大连接数，等待并重试
-                time.sleep(0.1)
-                return self.get_connection()
+            # 如果达到最大连接数，等待并重试
+            retry_count += 1
+            time.sleep(0.1)
+        
+        # 如果仍然无法获取连接，抛出异常
+        raise sqlite3.OperationalError("无法获取数据库连接: 超出最大重试次数")
     
     def return_connection(self, conn: sqlite3.Connection) -> None:
         """归还数据库连接到池中"""
         with self._lock:
-            if len(self._connections) < self._max_connections:
-                self._connections.append(conn)
-            else:
-                conn.close()
+            # 检查连接是否仍然有效
+            try:
+                conn.execute("SELECT 1")
+                # 连接有效，尝试归还到池中
+                if len(self._connections) < self._max_connections:
+                    self._connections.append(conn)
+                else:
+                    # 池已满，关闭连接
+                    conn.close()
+                    self._connection_count -= 1
+            except sqlite3.Error:
+                # 连接无效，关闭并减少计数
+                try:
+                    conn.close()
+                except:
+                    pass
                 self._connection_count -= 1
 
 # 全局连接池实例
@@ -135,9 +159,12 @@ def init_database() -> None:
             
             # 创建索引
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_last_activity ON users(last_activity)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_configs_user_id ON user_configs(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_forward_records_user_id ON forward_records(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_forward_records_status ON forward_records(status)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_forward_records_created_at ON forward_records(created_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_stats_user_id ON user_stats(user_id)')
             
             conn.commit()

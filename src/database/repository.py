@@ -227,10 +227,12 @@ class ForwardRecordRepository:
         """获取用户最近几天的转发记录"""
         query = """
         SELECT * FROM forward_records 
-        WHERE user_id = ? AND created_at >= datetime('now', ? || ' days')
+        WHERE user_id = ? AND created_at >= datetime('now', ?)
         ORDER BY created_at DESC
         """
-        results = execute_query(query, (user_id, f'-{days}'))
+        # Pre-format the days parameter to avoid SQLite expression evaluation per row
+        days_param = f'-{days} days'
+        results = execute_query(query, (user_id, days_param))
         return [ForwardRecord.from_dict(row) for row in results]
 
 class UserStatsRepository:

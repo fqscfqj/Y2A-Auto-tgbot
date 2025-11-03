@@ -69,12 +69,15 @@ class DatabasePool:
             # 检查连接是否仍然有效
             try:
                 conn.execute("SELECT 1")
-                # 连接有效，尝试归还到池中
+                # 连接有效，归还到池中（不关闭）
                 if len(self._connections) < self._max_connections:
                     self._connections.append(conn)
                 else:
-                    # 池已满，关闭连接
-                    conn.close()
+                    # 池已满，关闭连接并减少计数
+                    try:
+                        conn.close()
+                    except:
+                        pass
                     self._connection_count -= 1
             except sqlite3.Error:
                 # 连接无效，关闭并减少计数

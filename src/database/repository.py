@@ -299,7 +299,7 @@ class UserStatsRepository:
         """增加用户统计"""
         # 首先检查是否存在统计记录
         stats = UserStatsRepository.get_by_user_id(user_id)
-        now = datetime.now()  # Cache the current time
+        now = datetime.now()  # Use consistent timestamp for both creation and update
         
         if not stats:
             # 如果不存在，创建新的统计记录

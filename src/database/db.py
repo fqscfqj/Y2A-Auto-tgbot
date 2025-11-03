@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 class DatabasePool:
     """简单的数据库连接池实现"""
     
+    # Connection retry constants
+    MAX_CONNECTION_RETRIES = 50  # Maximum number of retries (5 seconds total)
+    RETRY_SLEEP_DURATION = 0.1   # Sleep duration between retries in seconds
+    
     def __init__(self, max_connections: int = 10):
         self._max_connections = max_connections
         self._connections: List[sqlite3.Connection] = []
@@ -25,10 +29,9 @@ class DatabasePool:
     def get_connection(self) -> sqlite3.Connection:
         """获取数据库连接"""
         # Use a timeout-based retry instead of recursion to avoid stack overflow
-        max_retries = 50  # 5 seconds total (50 * 0.1s)
         retry_count = 0
         
-        while retry_count < max_retries:
+        while retry_count < self.MAX_CONNECTION_RETRIES:
             with self._lock:
                 # 尝试从池中获取连接
                 if self._connections:
@@ -42,6 +45,7 @@ class DatabasePool:
                         try:
                             conn.close()
                         except:
+                            # Ignore any errors during connection cleanup
                             pass
                         self._connection_count -= 1
                 
@@ -58,10 +62,12 @@ class DatabasePool:
             
             # 如果达到最大连接数，等待并重试
             retry_count += 1
-            time.sleep(0.1)
+            time.sleep(self.RETRY_SLEEP_DURATION)
         
         # 如果仍然无法获取连接，抛出异常
-        raise sqlite3.OperationalError("无法获取数据库连接: 超出最大重试次数")
+        raise sqlite3.OperationalError(
+            f"无法获取数据库连接: 超出最大重试次数({self.MAX_CONNECTION_RETRIES}), 最大连接数: {self._max_connections}"
+        )
     
     def return_connection(self, conn: sqlite3.Connection) -> None:
         """归还数据库连接到池中"""
@@ -77,6 +83,7 @@ class DatabasePool:
                     try:
                         conn.close()
                     except:
+                        # Ignore any errors during connection cleanup
                         pass
                     self._connection_count -= 1
             except sqlite3.Error:
@@ -84,6 +91,7 @@ class DatabasePool:
                 try:
                     conn.close()
                 except:
+                    # Ignore any errors during connection cleanup
                     pass
                 self._connection_count -= 1
 

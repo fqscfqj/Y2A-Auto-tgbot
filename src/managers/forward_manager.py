@@ -176,15 +176,12 @@ class ForwardManager:
         """生成主菜单快捷操作按钮"""
         keyboard = [
             [
-                InlineKeyboardButton("🚀 开始引导", callback_data="main:start"),
                 InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"),
-            ],
-            [
                 InlineKeyboardButton("❓ 帮助", callback_data="main:help"),
             ],
         ]
         if include_example:
-            keyboard[1].insert(0, InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example"))
+            keyboard.insert(0, [InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example")])
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
@@ -436,19 +433,18 @@ class ForwardManager:
             raw_text = getattr(message_obj, 'text', None)
         text = (raw_text or "").strip()
 
-        # 优先处理设置流程：如果用户在设置 API/密码的状态中，应将文本视为输入而非当作链接
+        # 优先处理设置流程：如果用户在设置 API/密码的状态中
         try:
-            from src.managers.settings_manager import SettingsState, SettingsManager
+            from src.managers.settings_manager import SettingsManager
             user_data = context.user_data or {}
             pending_input = user_data.get("pending_input")
-            if pending_input in ("set_api", "set_password"):
-                if pending_input == "set_api":
-                    await SettingsManager._set_api_url_end(update, context)
-                elif pending_input == "set_password":
-                    await SettingsManager._set_password_end(update, context)
+            if pending_input == "set_api":
+                await SettingsManager._set_api_url_end(update, context)
+                return
+            elif pending_input == "set_password":
+                await SettingsManager._set_password_end(update, context)
                 return
         except Exception:
-            # 不要阻塞正常流程
             logger.debug("settings fallback handling failed", exc_info=True)
 
         # 引导流程处理（兜底）
@@ -463,18 +459,13 @@ class ForwardManager:
                 if guide.current_step == GuideStep.CONFIG_API.value:
                     await GuideManager.handle_api_input(update, context)
                     return
-                if guide.current_step == GuideStep.CONFIG_PASSWORD.value:
-                    await GuideManager.handle_password_input(update, context)
-                    return
         except Exception:
             logger.debug("guide fallback handling failed", exc_info=True)
 
         # 若不是 YouTube 链接，提示用户
         if not text or not ForwardManager.is_youtube_url(text):
             reply_markup = ForwardManager.main_menu_markup(include_example=True)
-            prompt = (
-                '请发送有效的YouTube视频或播放列表链接。\n\n也可以使用下方快捷操作：'
-            )
+            prompt = '请发送 YouTube 视频或播放列表链接。'
             if message_obj is not None:
                 await message_obj.reply_text(prompt, reply_markup=reply_markup)
             else:

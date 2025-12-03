@@ -5,16 +5,17 @@ from enum import Enum
 
 
 class GuideStep(Enum):
-    """引导步骤枚举"""
-    NOT_STARTED = "not_started"          # 未开始引导
+    """引导步骤枚举（简化版）"""
+    NOT_STARTED = "not_started"         # 未开始引导
     WELCOME = "welcome"                 # 欢迎步骤
-    INTRO_FEATURES = "intro_features"    # 介绍功能
     CONFIG_API = "config_api"           # 配置API地址
-    CONFIG_PASSWORD = "config_password" # 配置密码
-    TEST_CONNECTION = "test_connection" # 测试连接
-    SEND_EXAMPLE = "send_example"       # 发送示例链接
     COMPLETED = "completed"             # 引导完成
     SKIPPED = "skipped"                 # 跳过引导
+    # 以下保留用于兼容旧数据
+    INTRO_FEATURES = "intro_features"   # (已废弃) 介绍功能
+    CONFIG_PASSWORD = "config_password" # (已废弃) 配置密码
+    TEST_CONNECTION = "test_connection" # (已废弃) 测试连接
+    SEND_EXAMPLE = "send_example"       # (已废弃) 发送示例链接
 
 @dataclass
 class User:
@@ -256,23 +257,25 @@ class UserGuide:
             return False
     
     def get_next_step(self) -> Optional[str]:
-        """获取下一步骤"""
+        """获取下一步骤（简化版流程）"""
         if self.is_completed or self.is_skipped:
             return None
         
-        # 定义步骤顺序
+        # 简化的步骤顺序：欢迎 → 配置API → 完成
         step_order = [
             GuideStep.WELCOME.value,
-            GuideStep.INTRO_FEATURES.value,
             GuideStep.CONFIG_API.value,
-            GuideStep.CONFIG_PASSWORD.value,
-            GuideStep.TEST_CONNECTION.value,
-            GuideStep.SEND_EXAMPLE.value
         ]
         
         # 如果当前步骤为空，返回第一步
         if not self.current_step:
             return step_order[0]
+        
+        # 兼容旧数据：如果是旧的中间步骤，直接跳到配置API或完成
+        old_steps = [GuideStep.INTRO_FEATURES.value, GuideStep.CONFIG_PASSWORD.value, 
+                     GuideStep.TEST_CONNECTION.value, GuideStep.SEND_EXAMPLE.value]
+        if self.current_step in old_steps:
+            return GuideStep.CONFIG_API.value
         
         # 找到当前步骤在顺序中的位置
         try:

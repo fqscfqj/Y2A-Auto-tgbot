@@ -66,7 +66,10 @@ def main():
         application.add_handler(settings_handler)
         # 注册设置菜单的通用回调（按钮化）
         from src.managers.settings_manager import SettingsManager
-        settings_callback_handler = CallbackQueryHandler(SettingsManager.settings_callback, pattern=r"^(view_config|set_api_url|set_password|test_connection|delete_config|confirm_delete|back|skip)$")
+        settings_callback_handler = CallbackQueryHandler(
+            SettingsManager.settings_callback, 
+            pattern=r"^settings:"
+        )
         application.add_handler(settings_callback_handler)
         
         # 注册引导对话处理器
@@ -74,7 +77,10 @@ def main():
         application.add_handler(guide_handler)
         # 注册引导相关回调（用于处理引导内按钮）
         from src.managers.guide_manager import GuideManager
-        guide_callback_handler = CallbackQueryHandler(GuideManager.guide_callback, pattern=r"^(restart_guide|cancel_guide|next_step|skip_guide|skip_step|reconfig|send_example|complete_guide)$")
+        guide_callback_handler = CallbackQueryHandler(
+            GuideManager.guide_callback, 
+            pattern=r"^guide:"
+        )
         application.add_handler(guide_callback_handler)
         
         # 注册帮助命令处理器

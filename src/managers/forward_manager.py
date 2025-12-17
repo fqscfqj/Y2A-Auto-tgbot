@@ -230,6 +230,35 @@ class ForwardManager:
         return False
 
     @staticmethod
+    def _looks_like_login_html(resp: requests.Response) -> bool:
+        """粗略判断返回是否为登录页 HTML，避免误将登录页当作成功结果。"""
+        content_type = (resp.headers.get('Content-Type') or '').lower()
+        if 'application/json' in content_type:
+            return False
+
+        text_raw = resp.text or ''
+        text_lower = text_raw.lower()
+
+        # 只要是 HTML 或正文本身看起来像 HTML，就尝试匹配登录标记
+        looks_like_html = (
+            'text/html' in content_type
+            or text_lower.startswith('<!doctype html')
+            or text_lower.startswith('<html')
+        )
+        if not looks_like_html:
+            return False
+
+        markers = (
+            '<html',
+            'login',
+            '登录',
+            '<title>登录',
+            'name="password"',
+            'form action="/login',
+        )
+        return any(marker in text_lower for marker in markers)
+
+    @staticmethod
     async def _safe_send(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
         """安全地发送消息：优先使用 message.reply_text，其次使用 bot.send_message，最后尝试回答 callback_query。"""
         message_obj = getattr(update, "effective_message", None) or getattr(update, "message", None)
@@ -392,37 +421,52 @@ class ForwardManager:
             return False, "Y2A-Auto API 地址未配置"
         clean_url = ForwardManager.parse_api_url(api_url)
         
+        login_attempted = False
         try:
-            resp = session.post(clean_url, json={'youtube_url': youtube_url}, timeout=10)
-            
-            # 如果需要登录且配置了密码
-            if resp.status_code == 401 and getattr(config, 'y2a_password', None):
-                # 尝试登录后重试（确保 api_url 非空）
-                api_url = getattr(config, 'y2a_api_url', None)
-                if api_url and ForwardManager.try_login(session, api_url, config.y2a_password):
-                    resp = session.post(clean_url, json={'youtube_url': youtube_url}, timeout=10)
-            
-            if resp.ok:
-                try:
-                    data = resp.json()
-                except ValueError:
-                    body_preview = (resp.text or '').strip()
-                    body_preview = body_preview[:200] + ('...' if len(body_preview) > 200 else '')
-                    logger.error(
-                        "Y2A-Auto 返回非 JSON 响应，状态码=%s，响应体预览=%s",
-                        resp.status_code,
-                        body_preview,
-                    )
-                    return False, "Y2A-Auto 返回非 JSON 响应，请检查服务是否正常"
-                if data.get('success'):
-                    return True, data.get('message', '已添加任务')
+            for attempt in range(2):  # 最多重试一次（自动登录后再重发）
+                resp = session.post(clean_url, json={'youtube_url': youtube_url}, timeout=10)
+
+                # 401 明确需要登录
+                if resp.status_code == 401:
+                    if getattr(config, 'y2a_password', None) and not login_attempted:
+                        api_url = getattr(config, 'y2a_api_url', None)
+                        if api_url and ForwardManager.try_login(session, api_url, config.y2a_password):
+                            login_attempted = True
+                            continue
+                        return False, "Y2A-Auto需要登录，自动登录失败，请检查密码或手动登录Web。"
+                    return False, "Y2A-Auto需要登录，请在设置中填写密码。"
+
+                # 返回登录页 HTML（未返回401，但实际未登录）
+                if ForwardManager._looks_like_login_html(resp):
+                    if getattr(config, 'y2a_password', None) and not login_attempted:
+                        api_url = getattr(config, 'y2a_api_url', None)
+                        if api_url and ForwardManager.try_login(session, api_url, config.y2a_password):
+                            login_attempted = True
+                            continue
+                        return False, "Y2A-Auto需要登录，自动登录失败，请检查密码或手动登录Web。"
+                    return False, "Y2A-Auto需要登录，请在设置中填写密码或先在Web登录后重试。"
+
+                if resp.ok:
+                    try:
+                        data = resp.json()
+                    except ValueError:
+                        body_preview = (resp.text or '').strip()
+                        body_preview = body_preview[:200] + ('...' if len(body_preview) > 200 else '')
+                        logger.error(
+                            "Y2A-Auto 返回非 JSON 响应，状态码=%s，响应体预览=%s",
+                            resp.status_code,
+                            body_preview,
+                        )
+                        return False, "Y2A-Auto 返回非 JSON 响应，请检查服务是否正常"
+                    if data.get('success'):
+                        return True, data.get('message', '已添加任务')
+                    else:
+                        return False, data.get('message', '未知错误')
                 else:
-                    return False, data.get('message', '未知错误')
-            elif resp.status_code == 401:
-                return False, "Y2A-Auto需要登录，且自动登录失败，请检查密码或手动登录Web。"
-            else:
-                return False, f"Y2A-Auto接口请求失败，状态码：{resp.status_code}"
-        
+                    return False, f"Y2A-Auto接口请求失败，状态码：{resp.status_code}"
+
+            return False, "Y2A-Auto请求失败，已尝试自动登录"
+
         except requests.exceptions.RequestException as e:
             logger.error(f"请求异常: {e}")
             return False, f"网络请求异常：{e}"

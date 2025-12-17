@@ -502,5 +502,5 @@ API 地址：<code>{html.escape(api_url)}</code>
                 CommandHandler("skip", GuideManager.skip_command),
                 CommandHandler("cancel", GuideManager.cancel_command),
             ],
-            per_message=True,
+            per_message=False,
         )

@@ -403,7 +403,17 @@ class ForwardManager:
                     resp = session.post(clean_url, json={'youtube_url': youtube_url}, timeout=10)
             
             if resp.ok:
-                data = resp.json()
+                try:
+                    data = resp.json()
+                except ValueError:
+                    body_preview = (resp.text or '').strip()
+                    body_preview = body_preview[:200] + ('...' if len(body_preview) > 200 else '')
+                    logger.error(
+                        "Y2A-Auto 返回非 JSON 响应，状态码=%s，响应体预览=%s",
+                        resp.status_code,
+                        body_preview,
+                    )
+                    return False, "Y2A-Auto 返回非 JSON 响应，请检查服务是否正常"
                 if data.get('success'):
                     return True, data.get('message', '已添加任务')
                 else:

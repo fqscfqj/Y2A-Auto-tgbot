@@ -601,5 +601,5 @@ class SettingsManager:
                 ],
             },
             fallbacks=[CommandHandler("cancel", SettingsManager.cancel_command)],
-            per_message=False,
+            per_message=True,
         )

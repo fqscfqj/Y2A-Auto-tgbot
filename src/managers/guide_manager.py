@@ -292,7 +292,16 @@ class GuideManager:
         if not query:
             return ConversationHandler.END
         
-        await query.answer()
+        action = query.data or ""
+        
+        # 根据操作类型提供有意义的回调应答
+        action_labels = {
+            "guide:start_config": "开始配置...",
+            "guide:skip": "跳过引导...",
+            "guide:restart": "重新开始引导...",
+        }
+        answer_text = action_labels.get(action, "处理中...")
+        await query.answer(answer_text)
         
         user = await UserManager.ensure_user_registered(update, context)
         if not user or user.id is None:
@@ -314,8 +323,6 @@ class GuideManager:
                 updated_at=datetime.now()
             )
             UserGuideRepository.create(guide)
-        
-        action = query.data or ""
         
         if action == "guide:start_config":
             # 开始配置 - 进入API配置步骤

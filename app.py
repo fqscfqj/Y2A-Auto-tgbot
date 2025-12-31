@@ -111,9 +111,29 @@ def main():
         logger.info("收到中断信号，正在关闭Bot...")
         # 停止内存监控
         memory_monitor.stop_monitoring()
+        # 清理异步HTTP会话
+        _cleanup_aiohttp_session()
     except Exception as e:
         logger.error(f"启动Bot时出错: {e}")
         sys.exit(1)
+
+
+def _cleanup_aiohttp_session():
+    """清理异步HTTP会话"""
+    try:
+        import asyncio
+        from src.managers.forward_manager import _aiohttp_session
+        if _aiohttp_session and not _aiohttp_session.closed:
+            # 使用新的事件循环来关闭会话
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(_aiohttp_session.close())
+            finally:
+                loop.close()
+            logger.info("异步HTTP会话已关闭")
+    except Exception as e:
+        logger.debug(f"清理异步HTTP会话时出错: {e}")
 
 if __name__ == "__main__":
     main()

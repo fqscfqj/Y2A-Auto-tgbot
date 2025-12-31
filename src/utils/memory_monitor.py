@@ -93,12 +93,25 @@ def init_memory_monitor() -> None:
         logger.warning(f"内存警告: 使用率 {memory_info['percentage']:.1f}%, "
                       f"已用 {memory_info['used'] / 1024**2:.0f}MB, "
                       f"可用 {memory_info['available'] / 1024**2:.0f}MB")
+        # 在警告级别进行轻量级清理
+        from src.utils.resource_manager import resource_manager
+        cleaned = resource_manager.cleanup_inactive_users()
+        if cleaned > 0:
+            logger.info(f"清理了 {cleaned} 个非活跃用户的资源记录")
     
     def on_critical(memory_info):
         logger.critical(f"内存危险: 使用率 {memory_info['percentage']:.1f}%, "
                        f"已用 {memory_info['used'] / 1024**2:.0f}MB, "
                        f"可用 {memory_info['available'] / 1024**2:.0f}MB")
-        # 可以在这里添加紧急清理逻辑
+        # 在危险级别进行紧急清理
+        from src.utils.resource_manager import resource_manager
+        cleaned = resource_manager.cleanup_inactive_users()
+        if cleaned > 0:
+            logger.info(f"紧急清理了 {cleaned} 个非活跃用户的资源记录")
+        # 触发Python垃圾回收
+        import gc
+        gc.collect()
+        logger.info("已触发垃圾回收")
     
     memory_monitor.set_warning_callback(on_warning)
     memory_monitor.set_critical_callback(on_critical)

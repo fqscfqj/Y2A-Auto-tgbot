@@ -22,6 +22,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.constants import ChatAction
 
 from src.managers.user_manager import UserManager
 from src.database.models import User
@@ -44,6 +45,7 @@ class SettingsManager:
     - 统一的消息格式和按钮布局
     - 简化的状态管理
     - 清晰的用户反馈
+    - 优化的交互体验
     """
 
     # ==================== 辅助方法 ====================
@@ -53,6 +55,16 @@ class SettingsManager:
         """确保user_data已初始化"""
         if getattr(context, 'user_data', None) is None:
             context.user_data = {}
+
+    @staticmethod
+    async def _send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """发送typing指示器，让用户知道机器人正在处理"""
+        try:
+            chat = update.effective_chat
+            if chat:
+                await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
+        except Exception as e:
+            logger.debug(f"Failed to send typing action: {e}")
 
     @staticmethod
     async def _safe_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, 
@@ -187,14 +199,27 @@ class SettingsManager:
         if not query:
             return SettingsState.MAIN_MENU
         
-        await query.answer()
+        action = (query.data or "").replace("settings:", "")
+        
+        # 根据操作类型提供有意义的回调应答
+        action_labels = {
+            "view": "查看配置...",
+            "set_api": "设置API地址...",
+            "set_password": "设置密码...",
+            "test": "正在测试连接...",
+            "delete": "删除配置...",
+            "confirm_delete": "正在删除...",
+            "skip_password": "跳过密码设置...",
+            "back": "返回菜单...",
+            "done": "完成设置",
+        }
+        answer_text = action_labels.get(action, "处理中...")
+        await query.answer(answer_text)
         
         user = await UserManager.ensure_user_registered(update, context)
         if not user or user.id is None:
             await SettingsManager._safe_reply(update, context, "❌ 用户信息无效")
             return SettingsState.MAIN_MENU
-        
-        action = (query.data or "").replace("settings:", "")
         
         # 路由到对应处理方法
         handlers = {

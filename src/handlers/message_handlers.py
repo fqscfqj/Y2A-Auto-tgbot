@@ -55,14 +55,25 @@ class MessageHandlers:
     async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理主菜单相关的回调按钮"""
         query = update.callback_query
-        if query:
-            await query.answer()
+        if not query:
+            return
+
+        data = query.data or ""
+        
+        # 根据操作类型提供有意义的回调应答
+        action_labels = {
+            "main:start": "开始引导...",
+            "main:settings": "打开设置...",
+            "main:help": "显示帮助...",
+            "main:send_example": "发送示例链接...",
+            "test_connection": "正在测试连接...",
+        }
+        answer_text = action_labels.get(data, "处理中...")
+        await query.answer(answer_text)
 
         # 确保用户已注册
         from src.managers.user_manager import UserManager
         await UserManager.ensure_user_registered(update, context)
-
-        data = query.data if query else ""
 
         # 延迟导入以避免循环依赖
         from src.managers.forward_manager import ForwardManager

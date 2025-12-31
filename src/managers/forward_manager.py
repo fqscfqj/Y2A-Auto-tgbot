@@ -1,9 +1,10 @@
 import logging
 import os
 import asyncio
+import json
 import aiohttp
 import requests
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, NamedTuple
 from urllib.parse import urlparse, urlunparse
 from datetime import datetime
 from requests.adapters import HTTPAdapter
@@ -23,9 +24,22 @@ from src.utils.resource_manager import OperationContext, resource_manager
 
 logger = logging.getLogger(__name__)
 
+# Async HTTP connection pool configuration constants
+AIOHTTP_MAX_CONNECTIONS = 20  # Maximum total connections
+AIOHTTP_MAX_CONNECTIONS_PER_HOST = 10  # Maximum connections per host
+AIOHTTP_DNS_CACHE_TTL = 300  # DNS cache TTL in seconds
+AIOHTTP_TOTAL_TIMEOUT = 30  # Total request timeout in seconds
+AIOHTTP_CONNECT_TIMEOUT = 10  # Connection timeout in seconds
+
 # Async HTTP session for non-blocking requests
 _aiohttp_session: Optional[aiohttp.ClientSession] = None
 _aiohttp_lock = asyncio.Lock()
+
+
+class SimpleResponse(NamedTuple):
+    """Simple response object for async HTTP requests."""
+    status: int
+    ok: bool
 
 
 async def get_aiohttp_session() -> aiohttp.ClientSession:
@@ -33,11 +47,14 @@ async def get_aiohttp_session() -> aiohttp.ClientSession:
     global _aiohttp_session
     async with _aiohttp_lock:
         if _aiohttp_session is None or _aiohttp_session.closed:
-            timeout = aiohttp.ClientTimeout(total=30, connect=10)
+            timeout = aiohttp.ClientTimeout(
+                total=AIOHTTP_TOTAL_TIMEOUT, 
+                connect=AIOHTTP_CONNECT_TIMEOUT
+            )
             connector = aiohttp.TCPConnector(
-                limit=20,  # Max connections
-                limit_per_host=10,  # Max connections per host
-                ttl_dns_cache=300,  # DNS cache TTL
+                limit=AIOHTTP_MAX_CONNECTIONS,
+                limit_per_host=AIOHTTP_MAX_CONNECTIONS_PER_HOST,
+                ttl_dns_cache=AIOHTTP_DNS_CACHE_TTL,
                 enable_cleanup_closed=True
             )
             _aiohttp_session = aiohttp.ClientSession(
@@ -45,6 +62,15 @@ async def get_aiohttp_session() -> aiohttp.ClientSession:
                 connector=connector
             )
     return _aiohttp_session
+
+
+async def cleanup_aiohttp_session() -> None:
+    """Cleanup the async HTTP session. Public function for shutdown."""
+    global _aiohttp_session
+    if _aiohttp_session and not _aiohttp_session.closed:
+        await _aiohttp_session.close()
+        _aiohttp_session = None
+        logger.info("异步HTTP会话已关闭")
 
 class RateLimiter:
     """简单的速率限制器"""
@@ -534,7 +560,6 @@ class ForwardManager:
 
                         if 200 <= status < 300:
                             try:
-                                import json
                                 data = json.loads(text)
                             except (ValueError, json.JSONDecodeError):
                                 body_preview = text.strip()[:200]
@@ -634,31 +659,23 @@ class ForwardManager:
         
         session = await get_aiohttp_session()
 
-        async def try_get(url: str, ssl: Optional[bool] = None) -> Tuple[Optional[aiohttp.ClientResponse], Optional[Exception]]:
+        async def try_get(url: str, ssl: Optional[bool] = None) -> Tuple[Optional[SimpleResponse], Optional[Exception]]:
             try:
-                connector = None
                 if ssl is False:
                     # Create a new session with SSL verification disabled
                     connector = aiohttp.TCPConnector(ssl=False)
                     temp_session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10))
                     try:
                         async with temp_session.get(url, allow_redirects=True) as resp:
-                            # Need to read content before returning
                             status = resp.status
-                            return type('Response', (), {'status': status, 'ok': 200 <= status < 300})(), None
+                            return SimpleResponse(status=status, ok=200 <= status < 300), None
                     finally:
                         await temp_session.close()
                 else:
                     async with session.get(url, allow_redirects=True) as resp:
                         status = resp.status
-                        return type('Response', (), {'status': status, 'ok': 200 <= status < 300})(), None
-            except aiohttp.ClientSSLError as e:
-                return None, e
-            except aiohttp.ClientConnectorError as e:
-                return None, e
-            except asyncio.TimeoutError as e:
-                return None, e
-            except Exception as e:
+                        return SimpleResponse(status=status, ok=200 <= status < 300), None
+            except (aiohttp.ClientSSLError, aiohttp.ClientConnectorError, asyncio.TimeoutError, Exception) as e:
                 return None, e
 
         # 1) 首选访问 /login（最轻量且不改动数据）

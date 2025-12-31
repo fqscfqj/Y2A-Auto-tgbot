@@ -122,16 +122,14 @@ def _cleanup_aiohttp_session():
     """清理异步HTTP会话"""
     try:
         import asyncio
-        from src.managers.forward_manager import _aiohttp_session
-        if _aiohttp_session and not _aiohttp_session.closed:
-            # 使用新的事件循环来关闭会话
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(_aiohttp_session.close())
-            finally:
-                loop.close()
-            logger.info("异步HTTP会话已关闭")
+        from src.managers.forward_manager import cleanup_aiohttp_session
+        # 使用新的事件循环来关闭会话
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(cleanup_aiohttp_session())
+        finally:
+            loop.close()
     except Exception as e:
         logger.debug(f"清理异步HTTP会话时出错: {e}")
 

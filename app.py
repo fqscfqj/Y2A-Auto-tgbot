@@ -126,8 +126,9 @@ def _cleanup_aiohttp_session():
         # Check if there's already a running event loop
         try:
             loop = asyncio.get_running_loop()
-            # If we have a running loop, schedule the cleanup task
-            loop.create_task(cleanup_aiohttp_session())
+            # If we have a running loop, we can't safely cleanup from sync context
+            # The running loop should handle its own cleanup
+            logger.debug("Event loop is running, skipping aiohttp cleanup (loop will handle it)")
         except RuntimeError:
             # No running loop in current thread, create a new one for cleanup
             loop = asyncio.new_event_loop()

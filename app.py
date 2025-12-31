@@ -123,20 +123,13 @@ def _cleanup_aiohttp_session():
     try:
         import asyncio
         from src.managers.forward_manager import cleanup_aiohttp_session
-        # Check if there's already a running event loop
+        # Create a new event loop for cleanup to ensure completion
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            loop = asyncio.get_running_loop()
-            # If we have a running loop, we can't safely cleanup from sync context
-            # The running loop should handle its own cleanup
-            logger.debug("Event loop is running, skipping aiohttp cleanup (loop will handle it)")
-        except RuntimeError:
-            # No running loop in current thread, create a new one for cleanup
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(cleanup_aiohttp_session())
-            finally:
-                loop.close()
+            loop.run_until_complete(cleanup_aiohttp_session())
+        finally:
+            loop.close()
     except Exception as e:
         logger.debug(f"清理异步HTTP会话时出错: {e}")
 

@@ -203,11 +203,7 @@ class SettingsManager:
             "back": "返回菜单...",
             "done": "完成设置",
         }
-        # Handle empty action string separately to provide meaningful feedback
-        if action:
-            await query.answer(action_labels.get(action, "处理中..."))
-        else:
-            await query.answer("处理中...")
+        await query.answer(action_labels.get(action, "处理中..."))
         
         user = await UserManager.ensure_user_registered(update, context)
         if not user or user.id is None:

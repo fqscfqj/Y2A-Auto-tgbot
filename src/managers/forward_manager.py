@@ -520,8 +520,9 @@ class ForwardManager:
         login_attempted = False
         session = await get_aiohttp_session()
         
+        max_attempts = 2
         try:
-            for attempt in range(2):  # 最多重试一次（自动登录后再重发）
+            for attempt in range(max_attempts):  # 最多重试一次（自动登录后再重发）
                 try:
                     async with session.post(clean_url, json={'youtube_url': youtube_url}) as resp:
                         status = resp.status
@@ -568,13 +569,13 @@ class ForwardManager:
 
                 except asyncio.TimeoutError:
                     logger.warning("Y2A-Auto 请求超时，尝试重试（attempt=%s）", attempt)
-                    if attempt < 1:
+                    if attempt < max_attempts - 1:
                         # 还有重试机会，继续下一轮
                         continue
                     return False, "请求超时，请检查网络连接或服务器状态"
                 except aiohttp.ClientError as e:
                     logger.error("异步请求客户端异常 (attempt=%s): %s", attempt, e)
-                    if attempt < 1:
+                    if attempt < max_attempts - 1:
                         # 还有重试机会，继续下一轮
                         continue
                     return False, f"网络请求异常：{e}"

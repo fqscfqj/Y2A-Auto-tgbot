@@ -57,16 +57,6 @@ class SettingsManager:
             context.user_data = {}
 
     @staticmethod
-    async def _send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """发送typing指示器，让用户知道机器人正在处理"""
-        try:
-            chat = update.effective_chat
-            if chat:
-                await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
-        except Exception as e:
-            logger.debug(f"Failed to send typing action: {e}")
-
-    @staticmethod
     async def _safe_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                           text: str, reply_markup: Optional[InlineKeyboardMarkup] = None) -> None:
         """安全发送消息，支持编辑或回复"""
@@ -213,8 +203,11 @@ class SettingsManager:
             "back": "返回菜单...",
             "done": "完成设置",
         }
-        answer_text = action_labels.get(action, "处理中...")
-        await query.answer(answer_text)
+        # Handle empty action string separately to provide meaningful feedback
+        if action:
+            await query.answer(action_labels.get(action, "处理中..."))
+        else:
+            await query.answer("处理中...")
         
         user = await UserManager.ensure_user_registered(update, context)
         if not user or user.id is None:

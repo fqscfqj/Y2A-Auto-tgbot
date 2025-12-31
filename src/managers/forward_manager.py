@@ -283,37 +283,12 @@ class ForwardManager:
         return False
 
     @staticmethod
-    def _looks_like_login_html(resp: requests.Response) -> bool:
-        """粗略判断返回是否为登录页 HTML，避免误将登录页当作成功结果。"""
-        content_type = (resp.headers.get('Content-Type') or '').lower()
-        if 'application/json' in content_type:
-            return False
-
-        text_raw = resp.text or ''
-        text_lower = text_raw.lower()
-
-        # 只要是 HTML 或正文本身看起来像 HTML，就尝试匹配登录标记
-        looks_like_html = (
-            'text/html' in content_type
-            or text_lower.startswith('<!doctype html')
-            or text_lower.startswith('<html')
-        )
-        if not looks_like_html:
-            return False
-
-        markers = (
-            '<html',
-            'login',
-            '登录',
-            '<title>登录',
-            'name="password"',
-            'form action="/login',
-        )
-        return any(marker in text_lower for marker in markers)
-
-    @staticmethod
-    def _looks_like_login_html_from_text(content_type: str, text_raw: str) -> bool:
-        """Check if response text looks like a login HTML page (for async usage)."""
+    def _check_login_markers(content_type: str, text_raw: str) -> bool:
+        """Check if content type and text contain login page markers.
+        
+        This is the common logic used by both _looks_like_login_html and 
+        _looks_like_login_html_from_text to avoid code duplication.
+        """
         content_type_lower = content_type.lower()
         if 'application/json' in content_type_lower:
             return False
@@ -336,6 +311,18 @@ class ForwardManager:
             'form action="/login',
         )
         return any(marker in text_lower for marker in markers)
+
+    @staticmethod
+    def _looks_like_login_html(resp: requests.Response) -> bool:
+        """粗略判断返回是否为登录页 HTML，避免误将登录页当作成功结果。"""
+        content_type = resp.headers.get('Content-Type') or ''
+        text_raw = resp.text or ''
+        return ForwardManager._check_login_markers(content_type, text_raw)
+
+    @staticmethod
+    def _looks_like_login_html_from_text(content_type: str, text_raw: str) -> bool:
+        """Check if response text looks like a login HTML page (for async usage)."""
+        return ForwardManager._check_login_markers(content_type, text_raw)
 
     @staticmethod
     async def _async_try_login(session: aiohttp.ClientSession, y2a_api_url: str, y2a_password: Optional[str]) -> bool:

@@ -123,7 +123,7 @@ def _cleanup_aiohttp_session():
     try:
         import asyncio
         from src.managers.forward_manager import cleanup_aiohttp_session
-        # 使用新的事件循环来关闭会话
+        # Create a new event loop for cleanup to ensure completion
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:

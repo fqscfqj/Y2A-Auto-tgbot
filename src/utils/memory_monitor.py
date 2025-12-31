@@ -6,6 +6,7 @@ import psutil
 import logging
 import threading
 import time
+import gc
 from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ def init_memory_monitor() -> None:
                       f"已用 {memory_info['used'] / 1024**2:.0f}MB, "
                       f"可用 {memory_info['available'] / 1024**2:.0f}MB")
         # 在警告级别进行轻量级清理
+        # Local import to avoid circular imports at module load time
         from src.utils.resource_manager import resource_manager
         cleaned = resource_manager.cleanup_inactive_users()
         if cleaned > 0:
@@ -104,12 +106,12 @@ def init_memory_monitor() -> None:
                        f"已用 {memory_info['used'] / 1024**2:.0f}MB, "
                        f"可用 {memory_info['available'] / 1024**2:.0f}MB")
         # 在危险级别进行紧急清理
+        # Local import to avoid circular imports at module load time
         from src.utils.resource_manager import resource_manager
         cleaned = resource_manager.cleanup_inactive_users()
         if cleaned > 0:
             logger.info(f"紧急清理了 {cleaned} 个非活跃用户的资源记录")
         # 触发Python垃圾回收
-        import gc
         gc.collect()
         logger.info("已触发垃圾回收")
     

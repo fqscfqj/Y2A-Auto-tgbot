@@ -4,7 +4,7 @@ import asyncio
 import json
 import aiohttp
 import requests
-from typing import Optional, Dict, Any, Tuple, NamedTuple
+from typing import Optional, Tuple, NamedTuple
 from urllib.parse import urlparse, urlunparse
 from datetime import datetime
 from requests.adapters import HTTPAdapter
@@ -67,10 +67,11 @@ async def get_aiohttp_session() -> aiohttp.ClientSession:
 async def cleanup_aiohttp_session() -> None:
     """Cleanup the async HTTP session. Public function for shutdown."""
     global _aiohttp_session
-    if _aiohttp_session and not _aiohttp_session.closed:
-        await _aiohttp_session.close()
-        _aiohttp_session = None
-        logger.info("异步HTTP会话已关闭")
+    async with _aiohttp_lock:
+        if _aiohttp_session and not _aiohttp_session.closed:
+            await _aiohttp_session.close()
+            _aiohttp_session = None
+            logger.info("异步HTTP会话已关闭")
 
 class RateLimiter:
     """简单的速率限制器"""
@@ -282,37 +283,12 @@ class ForwardManager:
         return False
 
     @staticmethod
-    def _looks_like_login_html(resp: requests.Response) -> bool:
-        """粗略判断返回是否为登录页 HTML，避免误将登录页当作成功结果。"""
-        content_type = (resp.headers.get('Content-Type') or '').lower()
-        if 'application/json' in content_type:
-            return False
-
-        text_raw = resp.text or ''
-        text_lower = text_raw.lower()
-
-        # 只要是 HTML 或正文本身看起来像 HTML，就尝试匹配登录标记
-        looks_like_html = (
-            'text/html' in content_type
-            or text_lower.startswith('<!doctype html')
-            or text_lower.startswith('<html')
-        )
-        if not looks_like_html:
-            return False
-
-        markers = (
-            '<html',
-            'login',
-            '登录',
-            '<title>登录',
-            'name="password"',
-            'form action="/login',
-        )
-        return any(marker in text_lower for marker in markers)
-
-    @staticmethod
-    def _looks_like_login_html_from_text(content_type: str, text_raw: str) -> bool:
-        """Check if response text looks like a login HTML page (for async usage)."""
+    def _check_login_markers(content_type: str, text_raw: str) -> bool:
+        """Check if content type and text contain login page markers.
+        
+        This is the common logic used by both _looks_like_login_html and 
+        _looks_like_login_html_from_text to avoid code duplication.
+        """
         content_type_lower = content_type.lower()
         if 'application/json' in content_type_lower:
             return False
@@ -335,6 +311,18 @@ class ForwardManager:
             'form action="/login',
         )
         return any(marker in text_lower for marker in markers)
+
+    @staticmethod
+    def _looks_like_login_html(resp: requests.Response) -> bool:
+        """粗略判断返回是否为登录页 HTML，避免误将登录页当作成功结果。"""
+        content_type = resp.headers.get('Content-Type') or ''
+        text_raw = resp.text or ''
+        return ForwardManager._check_login_markers(content_type, text_raw)
+
+    @staticmethod
+    def _looks_like_login_html_from_text(content_type: str, text_raw: str) -> bool:
+        """Check if response text looks like a login HTML page (for async usage)."""
+        return ForwardManager._check_login_markers(content_type, text_raw)
 
     @staticmethod
     async def _async_try_login(session: aiohttp.ClientSession, y2a_api_url: str, y2a_password: Optional[str]) -> bool:
@@ -532,8 +520,9 @@ class ForwardManager:
         login_attempted = False
         session = await get_aiohttp_session()
         
+        max_attempts = 2
         try:
-            for attempt in range(2):  # 最多重试一次（自动登录后再重发）
+            for attempt in range(max_attempts):  # 最多重试一次（自动登录后再重发）
                 try:
                     async with session.post(clean_url, json={'youtube_url': youtube_url}) as resp:
                         status = resp.status
@@ -561,7 +550,7 @@ class ForwardManager:
                         if 200 <= status < 300:
                             try:
                                 data = json.loads(text)
-                            except (ValueError, json.JSONDecodeError):
+                            except json.JSONDecodeError:
                                 body_preview = text.strip()[:200]
                                 if len(text.strip()) > 200:
                                     body_preview += '...'
@@ -579,9 +568,16 @@ class ForwardManager:
                             return False, f"Y2A-Auto接口请求失败，状态码：{status}"
 
                 except asyncio.TimeoutError:
+                    logger.warning("Y2A-Auto 请求超时，尝试重试（attempt=%s）", attempt)
+                    if attempt < max_attempts - 1:
+                        # 还有重试机会，继续下一轮
+                        continue
                     return False, "请求超时，请检查网络连接或服务器状态"
                 except aiohttp.ClientError as e:
-                    logger.error(f"异步请求客户端异常: {e}")
+                    logger.error("异步请求客户端异常 (attempt=%s): %s", attempt, e)
+                    if attempt < max_attempts - 1:
+                        # 还有重试机会，继续下一轮
+                        continue
                     return False, f"网络请求异常：{e}"
 
             return False, "Y2A-Auto请求失败，已尝试自动登录"
@@ -660,23 +656,30 @@ class ForwardManager:
         session = await get_aiohttp_session()
 
         async def try_get(url: str, ssl: Optional[bool] = None) -> Tuple[Optional[SimpleResponse], Optional[Exception]]:
+            temp_session: Optional[aiohttp.ClientSession] = None
             try:
                 if ssl is False:
                     # Create a new session with SSL verification disabled
                     connector = aiohttp.TCPConnector(ssl=False)
-                    temp_session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10))
-                    try:
-                        async with temp_session.get(url, allow_redirects=True) as resp:
-                            status = resp.status
-                            return SimpleResponse(status=status, ok=200 <= status < 300), None
-                    finally:
-                        await temp_session.close()
+                    temp_session = aiohttp.ClientSession(
+                        connector=connector,
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    )
+                    async with temp_session.get(url, allow_redirects=True) as resp:
+                        status = resp.status
+                        return SimpleResponse(status=status, ok=200 <= status < 300), None
                 else:
                     async with session.get(url, allow_redirects=True) as resp:
                         status = resp.status
                         return SimpleResponse(status=status, ok=200 <= status < 300), None
             except (aiohttp.ClientSSLError, aiohttp.ClientConnectorError, asyncio.TimeoutError, Exception) as e:
                 return None, e
+            finally:
+                if temp_session is not None and not temp_session.closed:
+                    try:
+                        await temp_session.close()
+                    except Exception as close_err:
+                        logger.warning("Failed to close temporary aiohttp session: %s", close_err)
 
         # 1) 首选访问 /login（最轻量且不改动数据）
         login_url = api_url.replace('/tasks/add_via_extension', '/login')

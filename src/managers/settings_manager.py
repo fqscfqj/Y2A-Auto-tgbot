@@ -36,6 +36,7 @@ class SettingsState(IntEnum):
     SET_API_URL = 1
     SET_PASSWORD = 2
     DELETE_CONFIG = 3
+    SET_UPLOAD_TARGET = 4
 
 
 class SettingsManager:
@@ -102,6 +103,7 @@ class SettingsManager:
         
         if has_config:
             buttons.extend([
+                [InlineKeyboardButton("🎯 设置投稿平台", callback_data="settings:set_upload_target")],
                 [InlineKeyboardButton("🔬 测试连接", callback_data="settings:test")],
                 [InlineKeyboardButton("🗑️ 删除配置", callback_data="settings:delete")],
             ])
@@ -196,6 +198,11 @@ class SettingsManager:
             "view": "查看配置...",
             "set_api": "设置API地址...",
             "set_password": "设置密码...",
+            "set_upload_target": "设置投稿平台...",
+            "upload_target_acfun": "设置为AcFun...",
+            "upload_target_bilibili": "设置为bilibili...",
+            "upload_target_both": "设置为同时投稿...",
+            "upload_target_default": "使用服务器默认...",
             "test": "正在测试连接...",
             "delete": "删除配置...",
             "confirm_delete": "正在删除...",
@@ -215,6 +222,11 @@ class SettingsManager:
             "view": SettingsManager._view_config,
             "set_api": SettingsManager._set_api_start,
             "set_password": SettingsManager._set_password_start,
+            "set_upload_target": SettingsManager._set_upload_target,
+            "upload_target_acfun": SettingsManager._save_upload_target,
+            "upload_target_bilibili": SettingsManager._save_upload_target,
+            "upload_target_both": SettingsManager._save_upload_target,
+            "upload_target_default": SettingsManager._save_upload_target,
             "test": SettingsManager._test_connection,
             "delete": SettingsManager._delete_start,
             "confirm_delete": SettingsManager._delete_confirm,
@@ -246,6 +258,9 @@ class SettingsManager:
             created = config.created_at.strftime('%Y-%m-%d %H:%M') if config.created_at else "未知"
             updated = config.updated_at.strftime('%Y-%m-%d %H:%M') if config.updated_at else "未知"
             
+            target_labels = {"acfun": "AcFun", "bilibili": "bilibili", "both": "同时投稿（AcFun + bilibili）"}
+            upload_target_display = target_labels.get(config.upload_target or "", "服务器默认")
+            
             text = f"""<b>🔍 当前配置</b>
 
 <b>API 地址</b>
@@ -253,6 +268,9 @@ class SettingsManager:
 
 <b>密码</b>
 {password_status}
+
+<b>投稿平台</b>
+{upload_target_display}
 
 <b>时间</b>
 • 创建：{created}
@@ -461,8 +479,88 @@ class SettingsManager:
         
         return SettingsState.MAIN_MENU
 
-    # ==================== 测试连接 ====================
+    # ==================== 投稿平台 ====================
 
+    @staticmethod
+    def _upload_target_markup(current_target: Optional[str] = None) -> InlineKeyboardMarkup:
+        """投稿平台选择按钮"""
+        def mark(val: Optional[str]) -> str:
+            return "✅ " if current_target == val else ""
+
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{mark('acfun')}AcFun", callback_data="settings:upload_target_acfun")],
+            [InlineKeyboardButton(f"{mark('bilibili')}bilibili", callback_data="settings:upload_target_bilibili")],
+            [InlineKeyboardButton(f"{mark('both')}同时投稿（AcFun + bilibili）", callback_data="settings:upload_target_both")],
+            [InlineKeyboardButton(f"{mark(None)}使用服务器默认", callback_data="settings:upload_target_default")],
+            [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
+        ])
+
+    @staticmethod
+    async def _set_upload_target(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
+        """显示投稿平台选择菜单"""
+        if user.id is None:
+            await SettingsManager._safe_reply(update, context, "❌ 用户信息无效")
+            return SettingsState.MAIN_MENU
+
+        config = UserManager.get_user_config(user.id)
+        current_target = config.upload_target if config else None
+
+        text = """<b>🎯 设置投稿平台</b>
+
+请选择投稿目标平台：
+
+• <b>AcFun</b> - 仅上传到 AcFun
+• <b>bilibili</b> - 仅上传到 bilibili
+• <b>同时投稿</b> - 同时上传到 AcFun 和 bilibili
+• <b>服务器默认</b> - 使用 Y2A-Auto 服务的默认设置"""
+
+        await SettingsManager._safe_reply(
+            update, context, text,
+            SettingsManager._upload_target_markup(current_target)
+        )
+        return SettingsState.SET_UPLOAD_TARGET
+
+    @staticmethod
+    async def _save_upload_target(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
+        """保存投稿平台设置"""
+        if user.id is None:
+            await SettingsManager._safe_reply(update, context, "❌ 用户信息无效")
+            return SettingsState.MAIN_MENU
+
+        query = update.callback_query
+        action = (query.data or "").replace("settings:", "") if query else ""
+
+        target_map = {
+            "upload_target_acfun": "acfun",
+            "upload_target_bilibili": "bilibili",
+            "upload_target_both": "both",
+            "upload_target_default": None,
+        }
+        new_target = target_map.get(action)
+
+        config = UserManager.get_user_config(user.id)
+        if not config or not config.y2a_api_url:
+            await SettingsManager._safe_reply(
+                update, context,
+                "❌ 请先设置 API 地址",
+                SettingsManager._back_markup()
+            )
+            return SettingsState.MAIN_MENU
+
+        # 直接设置 upload_target，保留其他字段
+        success = UserManager.save_upload_target(user.id, new_target)
+
+        if success:
+            label_map = {"acfun": "AcFun", "bilibili": "bilibili", "both": "同时投稿（AcFun + bilibili）"}
+            label = label_map.get(new_target or "", "服务器默认")
+            text = f"<b>✅ 投稿平台已设置</b>\n\n当前设置：{label}"
+        else:
+            text = "❌ 设置失败，请稍后重试"
+
+        await SettingsManager._safe_reply(update, context, text, SettingsManager._back_markup())
+        return SettingsState.MAIN_MENU
+
+    # ==================== 测试连接 ====================
     @staticmethod
     async def _test_connection(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
         """测试连接"""
@@ -610,6 +708,12 @@ class SettingsManager:
                 SettingsState.DELETE_CONFIG: [
                     CallbackQueryHandler(
                         SettingsManager.settings_callback, 
+                        pattern=r"^settings:"
+                    ),
+                ],
+                SettingsState.SET_UPLOAD_TARGET: [
+                    CallbackQueryHandler(
+                        SettingsManager.settings_callback,
                         pattern=r"^settings:"
                     ),
                 ],

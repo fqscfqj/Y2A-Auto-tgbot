@@ -112,14 +112,15 @@ class UserConfigRepository:
     def create(config: UserConfig) -> int:
         """创建用户配置"""
         query = """
-        INSERT INTO user_configs (user_id, y2a_api_url, y2a_password, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO user_configs (user_id, y2a_api_url, y2a_password, upload_target, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         """
         now = datetime.now()
         params = (
             config.user_id,
             config.y2a_api_url,
             config.y2a_password,
+            config.upload_target,
             now,
             now
         )
@@ -134,12 +135,14 @@ class UserConfigRepository:
         UPDATE user_configs SET
             y2a_api_url = ?,
             y2a_password = ?,
+            upload_target = ?,
             updated_at = ?
         WHERE id = ?
         """
         params = (
             config.y2a_api_url,
             config.y2a_password,
+            config.upload_target,
             datetime.now(),
             config.id
         )
@@ -148,18 +151,21 @@ class UserConfigRepository:
         return rows_affected > 0
     
     @staticmethod
-    def update_by_user_id(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None) -> bool:
+    def update_by_user_id(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None,
+                          upload_target: Optional[str] = None) -> bool:
         """通过用户ID更新配置"""
         query = """
         UPDATE user_configs SET
             y2a_api_url = ?,
             y2a_password = ?,
+            upload_target = ?,
             updated_at = ?
         WHERE user_id = ?
         """
         params = (
             y2a_api_url,
             y2a_password,
+            upload_target,
             datetime.now(),
             user_id
         )

@@ -517,6 +517,12 @@ class ForwardManager:
             return False, "Y2A-Auto API 地址未配置"
         clean_url = ForwardManager.parse_api_url(api_url)
         
+        # 构建请求体，包含可选的upload_target
+        request_body: dict = {'youtube_url': youtube_url}
+        upload_target = getattr(config, 'upload_target', None)
+        if upload_target:
+            request_body['upload_target'] = upload_target
+
         login_attempted = False
         session = await get_aiohttp_session()
         
@@ -524,7 +530,7 @@ class ForwardManager:
         try:
             for attempt in range(max_attempts):  # 最多重试一次（自动登录后再重发）
                 try:
-                    async with session.post(clean_url, json={'youtube_url': youtube_url}) as resp:
+                    async with session.post(clean_url, json=request_body) as resp:
                         status = resp.status
                         content_type = resp.headers.get('Content-Type', '')
                         text = await resp.text()

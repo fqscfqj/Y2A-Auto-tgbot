@@ -90,7 +90,8 @@ class UserManager:
         return config is not None
     
     @staticmethod
-    def save_user_config(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None) -> bool:
+    def save_user_config(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None,
+                         upload_target: Optional[str] = None) -> bool:
         """保存用户配置"""
         # 检查是否已有配置
         config = UserConfigRepository.get_by_user_id(user_id)
@@ -98,19 +99,30 @@ class UserManager:
         if config:
             # 更新现有配置（如果传入 None，则保留现有密码或使用空字符串以匹配函数签名）
             password_to_use = y2a_password if y2a_password is not None else (config.y2a_password or "")
-            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, password_to_use)
+            # upload_target 传入 None 时保留现有值
+            target_to_use = upload_target if upload_target is not None else config.upload_target
+            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, password_to_use, target_to_use)
         else:
             # 创建新配置
             new_config = UserConfig(
                 user_id=user_id,
                 y2a_api_url=y2a_api_url,
                 y2a_password=y2a_password,
+                upload_target=upload_target,
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
             config_id = UserConfigRepository.create(new_config)
             return config_id is not None
     
+    @staticmethod
+    def save_upload_target(user_id: int, upload_target: Optional[str]) -> bool:
+        """显式设置用户的投稿平台，传入 None 表示使用服务器默认。仅更新该字段，不影响其他配置。"""
+        config = UserConfigRepository.get_by_user_id(user_id)
+        if not config or not config.y2a_api_url:
+            return False
+        return UserConfigRepository.update_upload_target_by_user_id(user_id, upload_target)
+
     @staticmethod
     def delete_user_config(user_id: int) -> bool:
         """删除用户配置"""

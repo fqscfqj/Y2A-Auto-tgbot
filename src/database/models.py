@@ -66,6 +66,7 @@ class UserConfig:
     user_id: Optional[int] = None
     y2a_api_url: Optional[str] = None
     y2a_password: Optional[str] = None
+    upload_target: Optional[str] = None  # acfun|bilibili|both，None表示使用服务器默认值
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
@@ -80,6 +81,7 @@ class UserConfig:
             user_id=data.get('user_id'),
             y2a_api_url=data.get('y2a_api_url'),
             y2a_password=data.get('y2a_password'),
+            upload_target=data.get('upload_target'),
             created_at=created_at,
             updated_at=updated_at
         )
@@ -91,6 +93,7 @@ class UserConfig:
             'user_id': self.user_id,
             'y2a_api_url': self.y2a_api_url,
             'y2a_password': self.y2a_password,
+            'upload_target': self.upload_target,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

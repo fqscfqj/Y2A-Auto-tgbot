@@ -112,14 +112,15 @@ class UserConfigRepository:
     def create(config: UserConfig) -> int:
         """创建用户配置"""
         query = """
-        INSERT INTO user_configs (user_id, y2a_api_url, y2a_password, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO user_configs (user_id, y2a_api_url, y2a_password, upload_target, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         """
         now = datetime.now()
         params = (
             config.user_id,
             config.y2a_api_url,
             config.y2a_password,
+            config.upload_target,
             now,
             now
         )
@@ -134,12 +135,14 @@ class UserConfigRepository:
         UPDATE user_configs SET
             y2a_api_url = ?,
             y2a_password = ?,
+            upload_target = ?,
             updated_at = ?
         WHERE id = ?
         """
         params = (
             config.y2a_api_url,
             config.y2a_password,
+            config.upload_target,
             datetime.now(),
             config.id
         )
@@ -147,24 +150,43 @@ class UserConfigRepository:
         rows_affected = execute_update(query, params)
         return rows_affected > 0
     
+    _UNSET = object()  # sentinel for "do not change this field"
+
     @staticmethod
-    def update_by_user_id(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None) -> bool:
-        """通过用户ID更新配置"""
-        query = """
-        UPDATE user_configs SET
-            y2a_api_url = ?,
-            y2a_password = ?,
-            updated_at = ?
-        WHERE user_id = ?
-        """
-        params = (
-            y2a_api_url,
-            y2a_password,
-            datetime.now(),
-            user_id
-        )
-        
+    def update_by_user_id(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None,
+                          upload_target: object = _UNSET) -> bool:
+        """通过用户ID更新配置。upload_target 不传则保留原值；传入 None 则显式清空。"""
+        if upload_target is UserConfigRepository._UNSET:
+            # 不更新 upload_target
+            query = """
+            UPDATE user_configs SET
+                y2a_api_url = ?,
+                y2a_password = ?,
+                updated_at = ?
+            WHERE user_id = ?
+            """
+            params = (y2a_api_url, y2a_password, datetime.now(), user_id)
+        else:
+            query = """
+            UPDATE user_configs SET
+                y2a_api_url = ?,
+                y2a_password = ?,
+                upload_target = ?,
+                updated_at = ?
+            WHERE user_id = ?
+            """
+            params = (y2a_api_url, y2a_password, upload_target, datetime.now(), user_id)
+
         rows_affected = execute_update(query, params)
+        return rows_affected > 0
+
+    @staticmethod
+    def update_upload_target_by_user_id(user_id: int, upload_target: Optional[str]) -> bool:
+        """仅更新 upload_target 字段，不影响其他字段。"""
+        query = """
+        UPDATE user_configs SET upload_target = ?, updated_at = ? WHERE user_id = ?
+        """
+        rows_affected = execute_update(query, (upload_target, datetime.now(), user_id))
         return rows_affected > 0
     
     @staticmethod

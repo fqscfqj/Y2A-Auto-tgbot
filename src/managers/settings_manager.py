@@ -259,7 +259,13 @@ class SettingsManager:
             updated = config.updated_at.strftime('%Y-%m-%d %H:%M') if config.updated_at else "未知"
             
             target_labels = {"acfun": "AcFun", "bilibili": "bilibili", "both": "同时投稿（AcFun + bilibili）"}
-            upload_target_display = target_labels.get(config.upload_target or "", "服务器默认")
+            raw_target = config.upload_target
+            if raw_target is None:
+                upload_target_display = "服务器默认"
+            elif raw_target in target_labels:
+                upload_target_display = target_labels[raw_target]
+            else:
+                upload_target_display = f"未知值: {html.escape(raw_target)}"
             
             text = f"""<b>🔍 当前配置</b>
 
@@ -536,7 +542,17 @@ class SettingsManager:
             "upload_target_both": "both",
             "upload_target_default": None,
         }
-        new_target = target_map.get(action)
+
+        if action not in target_map:
+            logger.warning("Unknown upload target action '%s' for user %s", action, user.id)
+            await SettingsManager._safe_reply(
+                update, context,
+                "❌ 无效的投稿平台选项，请从菜单中重新选择。",
+                SettingsManager._back_markup(),
+            )
+            return SettingsState.MAIN_MENU
+
+        new_target = target_map[action]
 
         config = UserManager.get_user_config(user.id)
         if not config or not config.y2a_api_url:

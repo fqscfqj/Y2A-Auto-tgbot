@@ -117,13 +117,11 @@ class UserManager:
     
     @staticmethod
     def save_upload_target(user_id: int, upload_target: Optional[str]) -> bool:
-        """显式设置用户的投稿平台，传入 None 表示使用服务器默认"""
+        """显式设置用户的投稿平台，传入 None 表示使用服务器默认。仅更新该字段，不影响其他配置。"""
         config = UserConfigRepository.get_by_user_id(user_id)
         if not config or not config.y2a_api_url:
             return False
-        return UserConfigRepository.update_by_user_id(
-            user_id, config.y2a_api_url, config.y2a_password or "", upload_target
-        )
+        return UserConfigRepository.update_upload_target_by_user_id(user_id, upload_target)
 
     @staticmethod
     def delete_user_config(user_id: int) -> bool:

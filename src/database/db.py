@@ -6,11 +6,35 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import time
+import re
 
 # 数据库路径
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'app.db')
 
 logger = logging.getLogger(__name__)
+
+
+def _build_safe_query_log_context(query: str, params: tuple = ()) -> str:
+    """Build a SQL execution summary without leaking parameter values."""
+    normalized_query = " ".join(query.strip().split())
+    operation_match = re.match(r"^([A-Z]+)", normalized_query, re.IGNORECASE)
+    operation = operation_match.group(1).upper() if operation_match else "UNKNOWN"
+
+    table_match = re.search(
+        r"\b(?:FROM|INTO|UPDATE|TABLE)\s+([A-Z_][A-Z0-9_]*)",
+        normalized_query,
+        re.IGNORECASE,
+    )
+    target = table_match.group(1).lower() if table_match else "unknown"
+
+    if not isinstance(params, tuple):
+        params = tuple(params) if params else ()
+
+    param_types = [type(param).__name__ for param in params]
+    return (
+        f"SQL操作={operation}, 目标={target}, 参数数量={len(params)}, "
+        f"参数类型={param_types}"
+    )
 
 # 数据库连接池
 class DatabasePool:
@@ -196,7 +220,11 @@ def execute_query(query: str, params: tuple = ()) -> List[Dict[str, Any]]:
             results = [dict(row) for row in cursor.fetchall()]
             return results
         except sqlite3.Error as e:
-            logger.error(f"查询执行失败: {e}, 查询: {query}, 参数: {params}")
+            logger.error(
+                "查询执行失败: %s, %s",
+                e,
+                _build_safe_query_log_context(query, params),
+            )
             raise
 
 def execute_update(query: str, params: tuple = ()) -> int:
@@ -209,7 +237,11 @@ def execute_update(query: str, params: tuple = ()) -> int:
             conn.commit()
             return cursor.rowcount
         except sqlite3.Error as e:
-            logger.error(f"更新操作失败: {e}, 查询: {query}, 参数: {params}")
+            logger.error(
+                "更新操作失败: %s, %s",
+                e,
+                _build_safe_query_log_context(query, params),
+            )
             conn.rollback()
             raise
 
@@ -225,7 +257,11 @@ def execute_insert(query: str, params: tuple = ()) -> int:
             # 确保返回 int（sqlite3 的 lastrowid 在某些情况下可能为 None）
             return int(last_id) if last_id is not None else 0
         except sqlite3.Error as e:
-            logger.error(f"插入操作失败: {e}, 查询: {query}, 参数: {params}")
+            logger.error(
+                "插入操作失败: %s, %s",
+                e,
+                _build_safe_query_log_context(query, params),
+            )
             conn.rollback()
             raise
 

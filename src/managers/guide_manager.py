@@ -1,8 +1,7 @@
 """
-引导管理器 - 简化版
+引导管理器
 
-流程：欢迎 → 配置API → 完成
-密码配置移至设置菜单（可选）
+流程：欢迎 → 配置 API 地址 → 配置 API Token → 测试/开始使用
 """
 import logging
 import html
@@ -22,26 +21,19 @@ from telegram.ext import (
 from src.managers.user_manager import UserManager
 from src.database.models import User, UserGuide, GuideStep
 from src.database.repository import UserGuideRepository
+from src.utils.config_status import get_config_status
 
 logger = logging.getLogger(__name__)
 
 
 class GuideState:
-    """引导状态常量（简化版）"""
+    """引导状态常量"""
     WELCOME = 1
     CONFIG_API = 2
 
 
 class GuideManager:
-    """引导管理器
-    
-    简化的引导流程：
-    1. 欢迎页面 - 介绍功能，提供开始配置按钮
-    2. 配置API - 输入Y2A-Auto API地址
-    3. 完成 - 配置成功，可以开始使用
-    
-    密码配置为可选，用户可在设置中添加。
-    """
+    """引导管理器。"""
     
     # 示例YouTube链接
     EXAMPLE_YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -95,6 +87,7 @@ class GuideManager:
     def _config_api_markup() -> InlineKeyboardMarkup:
         """配置API页面按钮"""
         return InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚙️ 打开设置", callback_data="main:settings")],
             [InlineKeyboardButton("⏭️ 稍后配置", callback_data="guide:skip")],
         ])
     
@@ -102,12 +95,63 @@ class GuideManager:
     def _complete_markup() -> InlineKeyboardMarkup:
         """完成页面按钮"""
         return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔬 测试连接", callback_data="main:test_connection")],
             [
                 InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example"),
                 InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"),
             ],
             [InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
         ])
+
+    @staticmethod
+    def _next_step_markup(action: str) -> InlineKeyboardMarkup:
+        """根据下一步生成引导按钮。"""
+        callback = f"settings:{action}"
+        if action == "set_api":
+            label = "🔧 设置 API 地址"
+        elif action == "set_api_token":
+            label = "🔐 设置 API Token"
+        else:
+            callback = "main:test_connection"
+            label = "🔬 测试连接"
+
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(label, callback_data=callback)],
+            [
+                InlineKeyboardButton("⚙️ 打开设置", callback_data="main:settings"),
+                InlineKeyboardButton("❓ 帮助", callback_data="main:help"),
+            ],
+        ])
+
+    @staticmethod
+    def mark_complete_if_ready(user_id: int) -> bool:
+        """如果用户配置已完整，则标记引导完成。"""
+        status = get_config_status(UserManager.get_user_config(user_id))
+        if not status.is_ready:
+            return False
+
+        guide = UserGuideRepository.get_by_user_id(user_id)
+        if not guide:
+            guide = UserGuide(
+                user_id=user_id,
+                current_step=GuideStep.COMPLETED.value,
+                completed_steps="[]",
+                is_completed=True,
+                is_skipped=False,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            )
+            guide.mark_step_completed(GuideStep.CONFIG_API.value)
+            UserGuideRepository.create(guide)
+            return True
+
+        guide.current_step = GuideStep.COMPLETED.value
+        guide.is_completed = True
+        guide.is_skipped = False
+        guide.mark_step_completed(GuideStep.CONFIG_API.value)
+        guide.updated_at = datetime.now()
+        UserGuideRepository.update(guide)
+        return True
     
     # ==================== 引导流程 ====================
     
@@ -123,6 +167,7 @@ class GuideManager:
         
         user_id = user.id
         guide = UserGuideRepository.get_by_user_id(user_id)
+        status = get_config_status(UserManager.get_user_config(user_id))
         
         if not guide:
             # 创建新引导记录
@@ -136,11 +181,20 @@ class GuideManager:
                 updated_at=datetime.now()
             )
             UserGuideRepository.create(guide)
-        elif guide.is_completed:
+        elif guide.is_completed and status.is_ready:
             # 已完成引导，显示欢迎回来消息
             return await GuideManager._show_already_completed(update, context, user)
+        elif guide.is_completed and not status.is_ready:
+            guide.is_completed = False
+            guide.updated_at = datetime.now()
+            UserGuideRepository.update(guide)
+            return await GuideManager._show_completed(update, context, user, guide)
         elif guide.is_skipped:
-            # 之前跳过引导，询问是否重新开始
+            if status.is_ready:
+                GuideManager.mark_complete_if_ready(user_id)
+                return await GuideManager._show_already_completed(update, context, user)
+            if status.has_api_url:
+                return await GuideManager._show_completed(update, context, user, guide)
             return await GuideManager._show_restart_prompt(update, context, user, guide)
         
         # 继续当前步骤
@@ -150,6 +204,14 @@ class GuideManager:
     async def _continue_guide(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                user: User, guide: UserGuide) -> int:
         """根据当前步骤继续引导"""
+        if user.id is not None:
+            status = get_config_status(UserManager.get_user_config(user.id))
+            if status.is_ready:
+                GuideManager.mark_complete_if_ready(user.id)
+                return await GuideManager._show_completed(update, context, user, guide)
+            if status.has_api_url:
+                return await GuideManager._show_completed(update, context, user, guide)
+
         step = guide.current_step
         
         if step == GuideStep.WELCOME.value:
@@ -175,13 +237,14 @@ class GuideManager:
 
 本机器人可将 YouTube 链接自动转发到您的 Y2A-Auto 服务。
 
-<b>📋 快速配置</b>
-只需设置您的 Y2A-Auto API 地址即可开始使用。
+<b>📋 快速配置需要 2 步</b>
+1. 设置 Y2A-Auto API 地址，让 Bot 知道任务提交到哪里
+2. 设置 Telegram Bot API Token，让主服务只授权 Bot 提交上传任务
 
 <b>💡 提示</b>
 • 配置完成后，直接发送 YouTube 链接即可转发
 • 支持视频和播放列表链接
-• 如需密码认证，可在设置中配置"""
+• Token 只具备提交上传任务权限，不会使用 Web 登录密码"""
         
         await GuideManager._safe_send(update, context, text, GuideManager._welcome_markup())
         return GuideState.WELCOME
@@ -208,7 +271,8 @@ class GuideManager:
 <b>💡 提示</b>
 • 只需输入主机和端口，路径会自动补全
 • 支持 http 和 https 协议
-• 如果服务需要密码，配置完成后可在设置中添加"""
+• 如果 Bot 和 Y2A-Auto 不在同一台机器，请填写 Bot 能访问到的地址
+• 下一步还需要配置专用 API Token"""
         
         await GuideManager._safe_send(update, context, text, GuideManager._config_api_markup())
         return GuideState.CONFIG_API
@@ -217,14 +281,40 @@ class GuideManager:
     async def _show_completed(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                user: User, guide: UserGuide) -> int:
         """显示完成页面"""
+        status = get_config_status(UserManager.get_user_config(user.id)) if user.id is not None else get_config_status(None)
+
+        if not status.is_ready:
+            if status.has_api_url:
+                text = f"""<b>✅ API 地址已保存</b>
+
+当前地址：<code>{html.escape(status.api_url)}</code>
+
+<b>下一步：设置 API Token</b>
+请在 Y2A-Auto Web 设置页生成 Telegram Bot API Token，然后回到这里粘贴完整 Token。
+
+Token 格式以 <code>y2a_tgbot_v1_</code> 开头，只授予 Bot 提交上传任务的权限。"""
+            else:
+                text = """<b>配置尚未完成</b>
+
+第一步需要先设置 Y2A-Auto API 地址。"""
+
+            await GuideManager._safe_send(
+                update,
+                context,
+                text,
+                GuideManager._next_step_markup(status.next_action),
+            )
+            return ConversationHandler.END
+
+        if user.id is not None:
+            GuideManager.mark_complete_if_ready(user.id)
+
         text = """<b>🎉 配置完成！</b>
 
 现在您可以直接发送 YouTube 链接，机器人会自动转发到您的 Y2A-Auto 服务。
 
-<b>🔧 后续操作</b>
-• 发送链接 - 直接粘贴 YouTube 链接即可
-• 设置 - 修改配置、添加密码、测试连接
-• 帮助 - 查看详细使用说明"""
+<b>建议先做一次连接测试</b>
+测试会检查 API 地址是否可达，以及 API Token 是否有效。"""
         
         await GuideManager._safe_send(update, context, text, GuideManager._complete_markup())
         return ConversationHandler.END
@@ -236,6 +326,15 @@ class GuideManager:
         from src.database.repository import UserStatsRepository
         
         user_id = user.id
+        status = get_config_status(UserManager.get_user_config(user_id)) if user_id else get_config_status(None)
+        if not status.is_ready:
+            guide = UserGuideRepository.get_by_user_id(user_id) if user_id else None
+            if guide:
+                guide.is_completed = False
+                guide.updated_at = datetime.now()
+                UserGuideRepository.update(guide)
+            return await GuideManager._show_completed(update, context, user, guide or UserGuide(user_id=user_id))
+
         stats = UserStatsRepository.get_by_user_id(user_id) if user_id else None
         
         total = stats.total_forwards if stats else 0
@@ -243,13 +342,14 @@ class GuideManager:
         
         text = f"""<b>👋 欢迎回来，{html.escape(user.first_name or '用户')}！</b>
 
-您已完成配置，可以直接发送 YouTube 链接进行转发。
+配置已就绪，可以直接发送 YouTube 链接进行转发。
 
 <b>📊 使用统计</b>
 • 总转发：{total} 次
 • 成功率：{rate}"""
         
         markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔬 测试连接", callback_data="main:test_connection")],
             [
                 InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example"),
                 InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"),
@@ -269,8 +369,8 @@ class GuideManager:
 您之前跳过了引导流程。
 
 <b>🔧 您可以选择</b>
-• 重新开始引导配置
-• 直接进入设置进行配置"""
+• 继续按步骤完成配置
+• 直接进入设置菜单手动配置"""
         
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🚀 重新开始", callback_data="guide:restart")],
@@ -287,79 +387,62 @@ class GuideManager:
     
     @staticmethod
     async def guide_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """处理引导相关的回调按钮"""
+        """处理引导相关的回调按钮。"""
         query = update.callback_query
         if not query:
             return ConversationHandler.END
-        
+
         action = query.data or ""
-        
-        # 根据操作类型提供有意义的回调应答
         action_labels = {
             "guide:start_config": "开始配置...",
-            "guide:skip": "跳过引导...",
-            "guide:restart": "重新开始引导...",
+            "guide:skip": "稍后配置...",
+            "guide:restart": "继续配置...",
         }
-        answer_text = action_labels.get(action, "处理中...")
-        await query.answer(answer_text)
-        
+        await query.answer(action_labels.get(action, "处理中..."))
+
         user = await UserManager.ensure_user_registered(update, context)
         if not user or user.id is None:
             await GuideManager._safe_send(update, context, "❌ 用户信息无效")
             return ConversationHandler.END
-        
-        user_id = user.id
-        guide = UserGuideRepository.get_by_user_id(user_id)
-        
+
+        guide = UserGuideRepository.get_by_user_id(user.id)
         if not guide:
-            # 创建新引导记录
             guide = UserGuide(
-                user_id=user_id,
+                user_id=user.id,
                 current_step=GuideStep.WELCOME.value,
                 completed_steps="[]",
                 is_completed=False,
                 is_skipped=False,
                 created_at=datetime.now(),
-                updated_at=datetime.now()
+                updated_at=datetime.now(),
             )
             UserGuideRepository.create(guide)
-        
-        if action == "guide:start_config":
-            # 开始配置 - 进入API配置步骤
-            guide.current_step = GuideStep.CONFIG_API.value
-            guide.updated_at = datetime.now()
-            UserGuideRepository.update(guide)
-            return await GuideManager._show_config_api(update, context, user, guide)
-        
-        elif action == "guide:skip":
-            # 跳过引导
-            guide.is_skipped = True
-            guide.updated_at = datetime.now()
-            UserGuideRepository.update(guide)
-            
-            text = """<b>⏭️ 已跳过引导</b>
 
-您可以随时使用以下方式进行配置：
-• /settings - 打开设置菜单
-• /start - 重新开始引导"""
-            
-            markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⚙️ 立即设置", callback_data="main:settings")],
-            ])
-            
-            await GuideManager._safe_send(update, context, text, markup)
-            return ConversationHandler.END
-        
-        elif action == "guide:restart":
-            # 重新开始引导
-            guide.current_step = GuideStep.WELCOME.value
-            guide.completed_steps = "[]"
+        if action in ("guide:start_config", "guide:restart"):
+            guide.current_step = GuideStep.CONFIG_API.value
+            guide.completed_steps = guide.completed_steps or "[]"
             guide.is_completed = False
             guide.is_skipped = False
             guide.updated_at = datetime.now()
             UserGuideRepository.update(guide)
-            return await GuideManager._show_welcome(update, context, user, guide)
-        
+            return await GuideManager._show_config_api(update, context, user, guide)
+
+        if action == "guide:skip":
+            guide.is_skipped = True
+            guide.updated_at = datetime.now()
+            UserGuideRepository.update(guide)
+
+            text = """<b>⏭️ 已选择稍后配置</b>
+
+需要使用时，请打开设置菜单继续配置 API 地址和 API Token。"""
+            markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚙️ 立即设置", callback_data="main:settings")],
+                [InlineKeyboardButton("❓ 帮助", callback_data="main:help")],
+            ])
+
+            await GuideManager._safe_send(update, context, text, markup)
+            return ConversationHandler.END
+
         return GuideState.WELCOME
     
     # ==================== 输入处理 ====================
@@ -398,46 +481,49 @@ class GuideManager:
         # 保存配置
         success = UserManager.save_user_config(user_id, api_url, None)
         
-        if success:
-            # 标记引导完成
-            guide.current_step = GuideStep.COMPLETED.value
-            guide.is_completed = True
-            guide.mark_step_completed(GuideStep.CONFIG_API.value)
-            guide.updated_at = datetime.now()
-            UserGuideRepository.update(guide)
-            
-            # 显示成功消息并提供后续选项
-            text = f"""<b>✅ 配置成功！</b>
+        if not success:
+            await message.reply_text("❌ 保存配置失败，请稍后重试")
+            return GuideState.CONFIG_API
+
+        guide.mark_step_completed(GuideStep.CONFIG_API.value)
+        guide.is_completed = False
+        guide.is_skipped = False
+        guide.updated_at = datetime.now()
+        UserGuideRepository.update(guide)
+
+        status = get_config_status(UserManager.get_user_config(user_id))
+        if status.is_ready:
+            GuideManager.mark_complete_if_ready(user_id)
+            return await GuideManager._show_completed(update, context, user, guide)
+
+        text = f"""<b>✅ API 地址已保存</b>
 
 API 地址：<code>{html.escape(api_url)}</code>
 
-现在您可以直接发送 YouTube 链接进行转发。
+<b>下一步：设置 API Token</b>
+请在 Y2A-Auto Web 设置页生成 Telegram Bot API Token，然后点击下方按钮粘贴到这里。
 
-<b>💡 建议</b>
-• 点击"测试连接"验证配置是否正确
-• 如需密码，可在设置中添加"""
-            
-            markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔬 测试连接", callback_data="test_connection")],
-                [
-                    InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example"),
-                    InlineKeyboardButton("⚙️ 更多设置", callback_data="main:settings"),
-                ],
-            ])
-            
-            await message.reply_text(text, reply_markup=markup, parse_mode='HTML')
-            return ConversationHandler.END
-        else:
-            await message.reply_text("❌ 保存配置失败，请稍后重试")
-            return GuideState.CONFIG_API
+<b>为什么需要 Token？</b>
+Bot 不再使用您的 Web 登录密码。专用 Token 只允许提交上传任务，权限更小，也可以随时在主服务撤销。"""
+
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔐 设置 API Token", callback_data="settings:set_api_token")],
+            [
+                InlineKeyboardButton("🔧 修改地址", callback_data="settings:set_api"),
+                InlineKeyboardButton("❓ 帮助", callback_data="main:help"),
+            ],
+        ])
+
+        await message.reply_text(text, reply_markup=markup, parse_mode='HTML')
+        return ConversationHandler.END
     
     @staticmethod
     async def handle_password_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """处理密码输入（兼容旧流程）- 重定向到设置"""
+        """处理旧流程输入 - 重定向到设置"""
         message = update.message
         if message:
             await message.reply_text(
-                "💡 密码配置已移至设置菜单。请完成引导后在设置中添加密码。",
+                "💡 现在请通过设置菜单配置专用 API Token。点击 /settings 后选择“设置 API Token”。",
                 parse_mode='HTML'
             )
         return ConversationHandler.END
@@ -460,7 +546,7 @@ API 地址：<code>{html.escape(api_url)}</code>
         message = update.message
         if message:
             await message.reply_text(
-                "⏭️ 已跳过引导。\n\n使用 /settings 进行配置，或 /start 重新开始引导。"
+                "⏭️ 已跳过引导。\n\n需要使用时，请发送 /settings 继续配置 API 地址和 API Token。"
             )
         return ConversationHandler.END
     
@@ -469,7 +555,7 @@ API 地址：<code>{html.escape(api_url)}</code>
         """处理 /cancel 命令"""
         message = update.message
         if message:
-            await message.reply_text("❌ 引导已取消。使用 /start 重新开始。")
+            await message.reply_text("已取消引导。发送 /start 可以继续配置。")
         return ConversationHandler.END
     
     # ==================== 兼容方法 ====================

@@ -1,14 +1,10 @@
 import logging
-import os
 import asyncio
 import json
 import aiohttp
-import requests
-from typing import Optional, Tuple, NamedTuple
+from typing import Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 from datetime import datetime
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import time
 import threading
 from collections import defaultdict
@@ -21,6 +17,7 @@ from src.managers.user_manager import UserManager
 from src.database.models import User, UserConfig, ForwardRecord
 from src.database.repository import ForwardRecordRepository, UserStatsRepository
 from src.utils.resource_manager import OperationContext, resource_manager
+from src.utils.config_status import TG_BOT_API_TOKEN_PREFIX as CONFIG_TOKEN_PREFIX, get_config_status, is_tgbot_api_token
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +31,6 @@ AIOHTTP_CONNECT_TIMEOUT = 10  # Connection timeout in seconds
 # Async HTTP session for non-blocking requests
 _aiohttp_session: Optional[aiohttp.ClientSession] = None
 _aiohttp_lock = asyncio.Lock()
-
-
-class SimpleResponse(NamedTuple):
-    """Simple response object for async HTTP requests."""
-    status: int
-    ok: bool
 
 
 async def get_aiohttp_session() -> aiohttp.ClientSession:
@@ -147,8 +138,7 @@ class RateLimiter:
 class ForwardManager:
     """转发管理器，负责处理YouTube链接的转发逻辑"""
     
-    # 全局HTTP会话实例，支持连接池
-    _http_session: Optional[requests.Session] = None
+    TG_BOT_API_TOKEN_PREFIX = CONFIG_TOKEN_PREFIX
     # 速率限制器
     _rate_limiter = RateLimiter(max_requests=30, time_window=60)  # 每分钟最多30个请求
     # 标记是否已初始化
@@ -160,35 +150,7 @@ class ForwardManager:
         if not cls._initialized:
             cls._rate_limiter.start_cleanup(interval=60)  # 每60秒清理一次
             cls._initialized = True
-    
-    @classmethod
-    def _get_http_session(cls) -> requests.Session:
-        """获取全局HTTP会话实例，支持连接池和重试机制"""
-        cls._ensure_initialized()  # 确保初始化
-        
-        if cls._http_session is None:
-            cls._http_session = requests.Session()
-            
-            # 配置重试策略
-            retry_strategy = Retry(
-                total=3,
-                backoff_factor=1,
-                status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
-            )
-            
-            # 配置HTTP适配器
-            adapter = HTTPAdapter(
-                max_retries=retry_strategy,
-                pool_connections=10,  # 连接池大小
-                pool_maxsize=20,      # 最大连接数
-                pool_block=False      # 非阻塞模式
-            )
-            
-            cls._http_session.mount("http://", adapter)
-            cls._http_session.mount("https://", adapter)
-            
-        return cls._http_session
+
     @staticmethod
     def normalize_api_url(input_url: str) -> str:
         """规范化用户输入的 API 地址。
@@ -222,7 +184,7 @@ class ForwardManager:
             # 用户给了其他路径，仍然强制到正确的添加任务接口
             norm_path = "/tasks/add_via_extension"
 
-        # 重新组装，不带用户名密码、查询与片段
+        # 重新组装，不带 URL 内嵌凭据、查询与片段
         return urlunparse((scheme, netloc, norm_path.rstrip("/"), "", "", ""))
     @staticmethod
     def main_menu_markup(include_example: bool = False) -> InlineKeyboardMarkup:
@@ -236,6 +198,19 @@ class ForwardManager:
         if include_example:
             keyboard.insert(0, [InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example")])
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def next_step_markup(config: Optional[UserConfig]) -> InlineKeyboardMarkup:
+        """根据配置状态生成下一步按钮。"""
+        status = get_config_status(config)
+        primary_callback = f"settings:{status.next_action}"
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(status.next_label, callback_data=primary_callback)],
+            [
+                InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"),
+                InlineKeyboardButton("❓ 帮助", callback_data="main:help"),
+            ],
+        ])
     
     @staticmethod
     def is_youtube_url(text: str) -> bool:
@@ -256,91 +231,13 @@ class ForwardManager:
         netloc = parsed.hostname or ""
         if parsed.port:
             netloc += f':{parsed.port}'
-        # 只替换netloc，不传username和password
+        # 只替换 netloc，不保留 URL 内嵌凭据
         clean_url = urlunparse(parsed._replace(netloc=netloc))
         return clean_url
-    
-    @staticmethod
-    def get_session() -> requests.Session:
-        """返回预配置的 requests.Session。"""
-        return ForwardManager._get_http_session()
-    
-    @staticmethod
-    def try_login(session: requests.Session, y2a_api_url: str, y2a_password: Optional[str]) -> bool:
-        """如有密码，尝试登录获取session cookie"""
-        if not y2a_password:
-            return False
-        
-        login_url = y2a_api_url.replace('/tasks/add_via_extension', '/login')
-        try:
-            resp = session.post(login_url, data={'password': y2a_password}, timeout=10, allow_redirects=True)
-            if resp.ok and ('登录成功' in resp.text or resp.url.endswith('/')):
-                logger.info('Y2A-Auto登录成功，已获取session cookie')
-                return True
-            logger.warning(f'Y2A-Auto登录失败: {resp.status_code}, {resp.text[:100]}')
-        except Exception as e:
-            logger.error(f'Y2A-Auto登录异常: {e}')
-        return False
 
     @staticmethod
-    def _check_login_markers(content_type: str, text_raw: str) -> bool:
-        """Check if content type and text contain login page markers.
-        
-        This is the common logic used by both _looks_like_login_html and 
-        _looks_like_login_html_from_text to avoid code duplication.
-        """
-        content_type_lower = content_type.lower()
-        if 'application/json' in content_type_lower:
-            return False
-
-        text_lower = text_raw.lower()
-        looks_like_html = (
-            'text/html' in content_type_lower
-            or text_lower.startswith('<!doctype html')
-            or text_lower.startswith('<html')
-        )
-        if not looks_like_html:
-            return False
-
-        markers = (
-            '<html',
-            'login',
-            '登录',
-            '<title>登录',
-            'name="password"',
-            'form action="/login',
-        )
-        return any(marker in text_lower for marker in markers)
-
-    @staticmethod
-    def _looks_like_login_html(resp: requests.Response) -> bool:
-        """粗略判断返回是否为登录页 HTML，避免误将登录页当作成功结果。"""
-        content_type = resp.headers.get('Content-Type') or ''
-        text_raw = resp.text or ''
-        return ForwardManager._check_login_markers(content_type, text_raw)
-
-    @staticmethod
-    def _looks_like_login_html_from_text(content_type: str, text_raw: str) -> bool:
-        """Check if response text looks like a login HTML page (for async usage)."""
-        return ForwardManager._check_login_markers(content_type, text_raw)
-
-    @staticmethod
-    async def _async_try_login(session: aiohttp.ClientSession, y2a_api_url: str, y2a_password: Optional[str]) -> bool:
-        """Async version: attempt login to get session cookie."""
-        if not y2a_password:
-            return False
-        
-        login_url = y2a_api_url.replace('/tasks/add_via_extension', '/login')
-        try:
-            async with session.post(login_url, data={'password': y2a_password}, allow_redirects=True) as resp:
-                text = await resp.text()
-                if resp.ok and ('登录成功' in text or str(resp.url).endswith('/')):
-                    logger.info('Y2A-Auto登录成功（异步），已获取session cookie')
-                    return True
-                logger.warning(f'Y2A-Auto登录失败（异步）: {resp.status}, {text[:100]}')
-        except Exception as e:
-            logger.error(f'Y2A-Auto登录异常（异步）: {e}')
-        return False
+    def is_tgbot_api_token(token: str) -> bool:
+        return is_tgbot_api_token(token)
 
     @staticmethod
     async def _send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -374,6 +271,7 @@ class ForwardManager:
     @staticmethod
     async def forward_youtube_url(update: Update, context: ContextTypes.DEFAULT_TYPE, youtube_url: str) -> None:
         """转发YouTube URL到Y2A-Auto"""
+        ForwardManager._ensure_initialized()
         user = await UserManager.ensure_user_registered(update, context)
         
         # 检查用户是否已配置
@@ -412,38 +310,33 @@ class ForwardManager:
     @staticmethod 
     async def _forward_youtube_internal(update: Update, context: ContextTypes.DEFAULT_TYPE, youtube_url: str, user: User) -> None:
         """内部转发逻辑，已在资源管理器保护下"""
-        if not UserManager.is_user_configured(user.telegram_id):
-            # 检查用户引导状态
-            user_id = user.id
-            guide = None
-            if user_id is not None:
-                guide = UserManager.get_user_guide(user_id)
-            
-            if guide and not guide.is_completed and not guide.is_skipped:
-                # 用户正在引导过程中，提示继续引导
-                message = update.effective_message or update.message
-                await ForwardManager._safe_send(
-                    update,
-                    context,
-                    "您尚未完成配置。请继续引导流程完成配置，或点击下方按钮打开设置。",
-                    reply_markup=ForwardManager.main_menu_markup(),
-                )
-            else:
-                # 用户未开始引导或已跳过引导
-                await ForwardManager._safe_send(
-                    update,
-                    context,
-                    "您尚未配置Y2A-Auto服务。可点击下方按钮开始引导或进入设置：",
-                    reply_markup=ForwardManager.main_menu_markup(),
-                )
-            return
-        
-        # 获取用户配置
         user_data = UserManager.get_user_with_config(user.telegram_id)
         config = user_data[1]
-        
-        if not config or not getattr(config, 'y2a_api_url', None):
-            await ForwardManager._safe_send(update, context, "您的Y2A-Auto配置不完整，请使用 /settings 命令重新配置")
+
+        status = get_config_status(config)
+        if not status.is_ready:
+            if not status.has_api_url:
+                prompt = (
+                    "已检测到 YouTube 链接，但 Bot 还不知道要提交到哪个 Y2A-Auto 服务。\n\n"
+                    "请先设置 API 地址，然后再配置专用 API Token。"
+                )
+            elif not status.has_api_token:
+                prompt = (
+                    "已检测到 YouTube 链接，但还缺少 Telegram Bot API Token。\n\n"
+                    "请在 Y2A-Auto Web 设置页生成 Token，然后回到这里粘贴。"
+                )
+            else:
+                prompt = (
+                    "已检测到 YouTube 链接，但当前 API Token 格式不正确。\n\n"
+                    "请重新复制主服务生成的完整 Token。"
+                )
+
+            await ForwardManager._safe_send(
+                update,
+                context,
+                prompt,
+                reply_markup=ForwardManager.next_step_markup(config),
+            )
             return
         
         # 发送正在转发的消息（安全访问 message）
@@ -516,6 +409,12 @@ class ForwardManager:
         if api_url is None:
             return False, "Y2A-Auto API 地址未配置"
         clean_url = ForwardManager.parse_api_url(api_url)
+
+        api_token = str(getattr(config, 'y2a_api_token', '') or '').strip()
+        if not api_token:
+            return False, "还没有配置 Telegram Bot API Token。请打开设置并填写专用 Token。"
+        if not is_tgbot_api_token(api_token):
+            return False, "API Token 格式不正确。请重新复制主服务设置页生成的完整 Token。"
         
         # 构建请求体，包含可选的upload_target
         request_body: dict = {'youtube_url': youtube_url}
@@ -523,35 +422,24 @@ class ForwardManager:
         if upload_target:
             request_body['upload_target'] = upload_target
 
-        login_attempted = False
         session = await get_aiohttp_session()
+        headers = {'Authorization': f'Bearer {api_token}'}
         
         max_attempts = 2
         try:
-            for attempt in range(max_attempts):  # 最多重试一次（自动登录后再重发）
+            for attempt in range(max_attempts):
                 try:
-                    async with session.post(clean_url, json=request_body) as resp:
+                    async with session.post(clean_url, json=request_body, headers=headers) as resp:
                         status = resp.status
-                        content_type = resp.headers.get('Content-Type', '')
                         text = await resp.text()
 
-                        # 401 明确需要登录
-                        if status == 401:
-                            if getattr(config, 'y2a_password', None) and not login_attempted:
-                                if api_url and await ForwardManager._async_try_login(session, api_url, config.y2a_password):
-                                    login_attempted = True
-                                    continue
-                                return False, "Y2A-Auto需要登录，自动登录失败，请检查密码或手动登录Web。"
-                            return False, "Y2A-Auto需要登录，请在设置中填写密码。"
-
-                        # 返回登录页 HTML（未返回401，但实际未登录）
-                        if ForwardManager._looks_like_login_html_from_text(content_type, text):
-                            if getattr(config, 'y2a_password', None) and not login_attempted:
-                                if api_url and await ForwardManager._async_try_login(session, api_url, config.y2a_password):
-                                    login_attempted = True
-                                    continue
-                                return False, "Y2A-Auto需要登录，自动登录失败，请检查密码或手动登录Web。"
-                            return False, "Y2A-Auto需要登录，请在设置中填写密码或先在Web登录后重试。"
+                        if status in (401, 403):
+                            try:
+                                data = json.loads(text)
+                                message = data.get('message') or 'Token 无效或权限不足'
+                            except json.JSONDecodeError:
+                                message = 'Token 无效或权限不足'
+                            return False, f"Y2A-Auto 拒绝请求：{message}。请检查 Token 是否已重置、撤销或复制错误。"
 
                         if 200 <= status < 300:
                             try:
@@ -565,28 +453,28 @@ class ForwardManager:
                                     status,
                                     body_preview,
                                 )
-                                return False, "Y2A-Auto 返回非 JSON 响应，请检查服务是否正常"
+                                return False, "Y2A-Auto 返回了无法识别的响应。请确认 API 地址指向 /tasks/add_via_extension。"
                             if data.get('success'):
                                 return True, data.get('message', '已添加任务')
                             else:
                                 return False, data.get('message', '未知错误')
                         else:
-                            return False, f"Y2A-Auto接口请求失败，状态码：{status}"
+                            return False, f"Y2A-Auto 接口请求失败，状态码：{status}。请稍后重试或检查服务日志。"
 
                 except asyncio.TimeoutError:
                     logger.warning("Y2A-Auto 请求超时，尝试重试（attempt=%s）", attempt)
                     if attempt < max_attempts - 1:
                         # 还有重试机会，继续下一轮
                         continue
-                    return False, "请求超时，请检查网络连接或服务器状态"
+                    return False, "请求超时。请确认 Bot 所在环境可以访问 Y2A-Auto 服务。"
                 except aiohttp.ClientError as e:
                     logger.error("异步请求客户端异常 (attempt=%s): %s", attempt, e)
                     if attempt < max_attempts - 1:
                         # 还有重试机会，继续下一轮
                         continue
-                    return False, f"网络请求异常：{e}"
+                    return False, "网络请求失败。请检查 API 地址、端口、防火墙或 TLS 证书配置。"
 
-            return False, "Y2A-Auto请求失败，已尝试自动登录"
+            return False, "Y2A-Auto请求失败，已重试"
 
         except Exception as e:
             logger.error(f"转发异常: {e}")
@@ -605,7 +493,7 @@ class ForwardManager:
             raw_text = getattr(message_obj, 'text', None)
         text = (raw_text or "").strip()
 
-        # 优先处理设置流程：如果用户在设置 API/密码的状态中
+        # 优先处理设置流程：如果用户在设置 API/API Token 的状态中
         try:
             from src.managers.settings_manager import SettingsManager
             user_data = context.user_data or {}
@@ -613,8 +501,8 @@ class ForwardManager:
             if pending_input == "set_api":
                 await SettingsManager._set_api_url_end(update, context)
                 return
-            elif pending_input == "set_password":
-                await SettingsManager._set_password_end(update, context)
+            elif pending_input == "set_api_token":
+                await SettingsManager._set_api_token_end(update, context)
                 return
         except Exception:
             logger.debug("settings fallback handling failed", exc_info=True)
@@ -636,8 +524,14 @@ class ForwardManager:
 
         # 若不是 YouTube 链接，提示用户
         if not text or not ForwardManager.is_youtube_url(text):
-            reply_markup = ForwardManager.main_menu_markup(include_example=True)
-            prompt = '请发送 YouTube 视频或播放列表链接。'
+            config = UserManager.get_user_config(user.id) if user and user.id is not None else None
+            status = get_config_status(config)
+            if not status.is_ready:
+                reply_markup = ForwardManager.next_step_markup(config)
+                prompt = f"这条消息不是 YouTube 链接。\n\n{status.summary}\n\n请先完成配置，然后直接发送 YouTube 视频或播放列表链接。"
+            else:
+                reply_markup = ForwardManager.main_menu_markup(include_example=True)
+                prompt = "请发送 YouTube 视频或播放列表链接。\n\n支持 youtube.com/watch、youtu.be 和 youtube.com/playlist。"
             if message_obj is not None:
                 await message_obj.reply_text(prompt, reply_markup=reply_markup)
             else:
@@ -650,88 +544,56 @@ class ForwardManager:
     @staticmethod
     async def test_connection(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, config: UserConfig) -> str:
         """测试Y2A-Auto连接 - 使用异步HTTP请求"""
-        # 发送typing指示器
         await ForwardManager._send_typing_action(update, context)
         
-        # 确保配置中包含可用的 api_url
         api_url = getattr(config, 'y2a_api_url', None)
         if not api_url:
             return "❌ Y2A-Auto API 地址未配置"
         clean_url = ForwardManager.parse_api_url(api_url)
+
+        status = get_config_status(config)
+        if not status.is_ready:
+            return f"❌ {status.summary}"
+
+        api_token = str(getattr(config, 'y2a_api_token', '') or '').strip()
+        if not api_token:
+            return "❌ Y2A-Auto API Token 未配置"
+        if not is_tgbot_api_token(api_token):
+            return "❌ Y2A-Auto API Token 格式不正确"
         
         session = await get_aiohttp_session()
+        headers = {'Authorization': f'Bearer {api_token}'}
 
-        async def try_get(url: str, ssl: Optional[bool] = None) -> Tuple[Optional[SimpleResponse], Optional[Exception]]:
-            temp_session: Optional[aiohttp.ClientSession] = None
-            try:
-                if ssl is False:
-                    # Create a new session with SSL verification disabled
-                    connector = aiohttp.TCPConnector(ssl=False)
-                    temp_session = aiohttp.ClientSession(
-                        connector=connector,
-                        timeout=aiohttp.ClientTimeout(total=10)
-                    )
-                    async with temp_session.get(url, allow_redirects=True) as resp:
-                        status = resp.status
-                        return SimpleResponse(status=status, ok=200 <= status < 300), None
-                else:
-                    async with session.get(url, allow_redirects=True) as resp:
-                        status = resp.status
-                        return SimpleResponse(status=status, ok=200 <= status < 300), None
-            except (aiohttp.ClientSSLError, aiohttp.ClientConnectorError, asyncio.TimeoutError, Exception) as e:
-                return None, e
-            finally:
-                if temp_session is not None and not temp_session.closed:
+        try:
+            async with session.post(clean_url, json={'youtube_url': ''}, headers=headers) as resp:
+                text = await resp.text()
+                if resp.status == 400:
                     try:
-                        await temp_session.close()
-                    except Exception as close_err:
-                        logger.warning("Failed to close temporary aiohttp session: %s", close_err)
-
-        # 1) 首选访问 /login（最轻量且不改动数据）
-        login_url = api_url.replace('/tasks/add_via_extension', '/login')
-
-        # 1.1 正常证书校验
-        resp, err = await try_get(login_url)
-        
-        # 1.2 若证书问题，允许忽略证书重试
-        if err and isinstance(err, aiohttp.ClientSSLError):
-            resp, err = await try_get(login_url, ssl=False)
-
-        # 1.3 若仍连接错误且是 https，试试 http 回退
-        if err and isinstance(err, aiohttp.ClientConnectorError) and login_url.startswith("https://"):
-            http_login = login_url.replace("https://", "http://", 1)
-            resp, err = await try_get(http_login)
-
-        if resp is not None:
-            # 能连上服务器
-            if resp.status == 200:
-                if config.y2a_password:
-                    if await ForwardManager._async_try_login(session, api_url, config.y2a_password):
-                        return "✅ 连接成功，登录成功"
-                    return "⚠️ 连接成功，但登录失败，请检查密码"
-                return "✅ 连接成功"
-            # 401/403 表示服务可达但需要鉴权
-            if resp.status in (401, 403):
-                return "⚠️ 服务可达，但需要登录或权限不足，请检查密码或服务设置"
-            # 其余状态码，但已连接上
-            return f"⚠️ 服务可达，但返回状态码：{resp.status}"
-
-        # 2) /login 不可达，最后尝试目标 API 路径以区分网络问题
-        resp2, err2 = await try_get(clean_url)
-        if resp2 is not None:
-            if resp2.status in (200, 400, 401, 403, 404, 405):
-                return f"⚠️ 服务可达（状态码 {resp2.status}），但 /login 不可达，请检查服务配置"
-
-        # 3) 仍然不可达，给出更明确的错误提示
-        final_err = err or err2
-        if isinstance(final_err, asyncio.TimeoutError):
-            return "❌ 连接失败，请求超时"
-        if isinstance(final_err, aiohttp.ClientConnectorError):
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        data = {}
+                    if 'YouTube URL不能为空' in str(data.get('message') or ''):
+                        return "✅ 连接成功，Token 有效"
+                    return "✅ 服务可达，Token 已通过鉴权"
+                if resp.status in (200, 201, 202):
+                    return "✅ 连接成功，Token 有效"
+                if resp.status in (401, 403):
+                    try:
+                        data = json.loads(text)
+                        message = data.get('message') or 'Token 无效或权限不足'
+                    except json.JSONDecodeError:
+                        message = 'Token 无效或权限不足'
+                    return f"❌ 服务可达，但 {message}。请检查 Token 是否已重置、撤销或复制错误。"
+                return f"⚠️ 服务可达，但返回状态码：{resp.status}。请检查 Y2A-Auto 服务日志。"
+        except asyncio.TimeoutError:
+            return "❌ 连接失败，请求超时。请确认 Bot 所在环境可以访问 Y2A-Auto 服务。"
+        except aiohttp.ClientConnectorError:
             return "❌ 连接失败，无法连接到服务器（网络/端口/防火墙）"
-        if isinstance(final_err, aiohttp.ClientSSLError):
+        except aiohttp.ClientSSLError:
             return "❌ 连接失败，TLS/证书错误，可尝试使用 http 或正确配置证书"
-
-        return f"❌ 连接失败：{final_err or '未知错误'}"
+        except aiohttp.ClientError as e:
+            logger.error("连接测试失败: %s", e)
+            return "❌ 连接失败。请检查 API 地址、端口、防火墙或 TLS 证书配置。"
     
     @staticmethod
     async def handle_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

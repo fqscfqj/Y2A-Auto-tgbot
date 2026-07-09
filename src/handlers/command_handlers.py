@@ -1,5 +1,4 @@
 import logging
-import html
 from typing import Dict, Any
 
 from telegram import Update
@@ -18,9 +17,14 @@ HELP_TEXT = """
 
 将 YouTube 链接自动转发到您的 Y2A-Auto 服务。
 
-<b>📋 使用方法</b>
-1. 使用 /settings 配置 API 地址
-2. 直接发送 YouTube 链接即可转发
+<b>📋 第一次使用</b>
+1. 使用 /settings 设置 Y2A-Auto API 地址
+2. 在 Y2A-Auto Web 设置页生成 Telegram Bot API Token
+3. 回到 Bot 中设置 API Token
+4. 测试连接后，直接发送 YouTube 链接即可转发
+
+<b>🔐 关于 API Token</b>
+Token 格式以 <code>y2a_tgbot_v1_</code> 开头，只授予 Bot 提交上传任务权限，不使用 Web 登录密码。
 
 <b>🔧 常用命令</b>
 • /start — 开始使用 / 查看状态
@@ -40,68 +44,7 @@ class CommandHandlers:
     @staticmethod
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理/start命令"""
-        user = await UserManager.ensure_user_registered(update, context)
-        safe_name = html.escape(user.first_name or "")
-
-        # 安全地获取消息对象以避免 optional member 访问警告
-        effective_message = update.effective_message
-        if effective_message is None:
-            logger.error("start_command: effective_message is None")
-            return
-
-        # 确保 user.id 非 None 再调用需要 int 的函数，避免将 Optional[int] 传递给类型为 int 的参数
-        if user.id is None:
-            await effective_message.reply_text("❌ 用户信息不完整，无法处理请求")
-            return
-        user_id = int(user.id)
-
-        # 检查用户引导状态
-        guide = UserManager.get_user_guide(user_id)
-        
-        if not guide:
-            # 新用户，创建引导记录并开始引导
-            guide = UserManager.ensure_user_guide(user_id)
-            await GuideManager.start_guide(update, context)
-            return
-        elif guide.is_completed:
-            # 已完成引导的用户
-            from src.database.repository import UserStatsRepository
-            user_stats = UserStatsRepository.get_by_user_id(user_id)
-
-            total_forwards = user_stats.total_forwards if user_stats else 0
-            success_rate = getattr(user_stats, "success_rate", None)
-            success_rate_str = f"{success_rate:.1f}%" if success_rate is not None else "0%"
-
-            welcome_text = f"""
-👋 欢迎回来，{safe_name}！
-
-您已经完成了引导配置，可以直接发送YouTube链接进行转发。
-
-📊 您的统计信息：
-• 总转发次数：{total_forwards}
-• 成功率：{success_rate_str}
-
-🔧 其他命令：
-• /settings - 修改配置
-• /help - 查看帮助
-"""
-            await effective_message.reply_text(welcome_text)
-        elif guide.is_skipped:
-            # 跳过引导的用户
-            welcome_text = f"""
-👋 欢迎回来，{safe_name}！
-
-您之前跳过了引导流程。您可以选择：
-
-🚀 选项：
-• /start - 重新开始引导流程
-• /settings - 直接进行配置
-• /help - 查看帮助信息
-"""
-            await effective_message.reply_text(welcome_text)
-        else:
-            # 未完成引导的用户，继续引导
-            await GuideManager._continue_guide(update, context, user, guide)
+        await GuideManager.start_guide(update, context)
     
     @staticmethod
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

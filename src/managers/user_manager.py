@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 from src.database.models import User, UserConfig, UserGuide, GuideStep
 from src.database.repository import UserRepository, UserConfigRepository, UserGuideRepository
+from src.utils.config_status import ConfigStatus, get_config_status
 
 logger = logging.getLogger(__name__)
 
@@ -88,26 +89,31 @@ class UserManager:
         """检查用户是否有配置"""
         config = UserConfigRepository.get_by_user_id(user_id)
         return config is not None
+
+    @staticmethod
+    def get_user_config_status(user_id: int) -> ConfigStatus:
+        """获取用户配置完成度。"""
+        return get_config_status(UserConfigRepository.get_by_user_id(user_id))
     
     @staticmethod
-    def save_user_config(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None,
+    def save_user_config(user_id: int, y2a_api_url: str, y2a_api_token: Optional[str] = None,
                          upload_target: Optional[str] = None) -> bool:
         """保存用户配置"""
         # 检查是否已有配置
         config = UserConfigRepository.get_by_user_id(user_id)
         
         if config:
-            # 更新现有配置（如果传入 None，则保留现有密码或使用空字符串以匹配函数签名）
-            password_to_use = y2a_password if y2a_password is not None else (config.y2a_password or "")
+            # 更新现有配置（如果传入 None，则保留现有 API Token）
+            token_to_use = y2a_api_token if y2a_api_token is not None else (config.y2a_api_token or "")
             # upload_target 传入 None 时保留现有值
             target_to_use = upload_target if upload_target is not None else config.upload_target
-            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, password_to_use, target_to_use)
+            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, token_to_use, target_to_use)
         else:
             # 创建新配置
             new_config = UserConfig(
                 user_id=user_id,
                 y2a_api_url=y2a_api_url,
-                y2a_password=y2a_password,
+                y2a_api_token=y2a_api_token,
                 upload_target=upload_target,
                 created_at=datetime.now(),
                 updated_at=datetime.now()
@@ -145,7 +151,7 @@ class UserManager:
     
     @staticmethod
     def is_user_configured(telegram_id: int) -> bool:
-        """检查用户是否已配置Y2A-Auto"""
+        """检查用户是否已完成可转发所需配置。"""
         user = UserRepository.get_by_telegram_id(telegram_id)
         if not user:
             return False
@@ -155,7 +161,7 @@ class UserManager:
             return False
 
         config = UserConfigRepository.get_by_user_id(int(user.id))
-        return bool(config and config.y2a_api_url)
+        return get_config_status(config).is_ready
     
     @staticmethod
     async def ensure_user_registered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> User:
@@ -189,7 +195,7 @@ class UserManager:
                 "",  # Empty line
                 "Y2A-Auto配置:",
                 f"API地址: {config.y2a_api_url}",
-                f"密码: {'已设置' if config.y2a_password else '未设置'}",
+                f"API Token: {'已设置' if config.y2a_api_token else '未设置'}",
                 f"配置时间: {config.created_at.strftime('%Y-%m-%d %H:%M:%S') if config.created_at else '未知'}",
             ])
         else:

@@ -4,7 +4,7 @@
 提供统一的设置界面，支持：
 - 查看当前配置
 - 设置/修改API地址
-- 设置/修改密码
+- 设置/修改API Token
 - 测试连接
 - 删除配置
 """
@@ -26,6 +26,7 @@ from telegram.constants import ChatAction
 
 from src.managers.user_manager import UserManager
 from src.database.models import User
+from src.utils.config_status import get_config_status, is_tgbot_api_token, upload_target_label
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class SettingsState(IntEnum):
     """设置状态"""
     MAIN_MENU = 0
     SET_API_URL = 1
-    SET_PASSWORD = 2
+    SET_API_TOKEN = 2
     DELETE_CONFIG = 3
     SET_UPLOAD_TARGET = 4
 
@@ -89,28 +90,58 @@ class SettingsManager:
     # ==================== 按钮布局 ====================
 
     @staticmethod
-    def _main_menu_markup(has_config: bool = False) -> InlineKeyboardMarkup:
-        """主菜单按钮布局"""
-        buttons = []
-        
-        if has_config:
-            buttons.append([InlineKeyboardButton("🔍 查看配置", callback_data="settings:view")])
-        
-        buttons.extend([
-            [InlineKeyboardButton("🔧 设置 API 地址", callback_data="settings:set_api")],
-            [InlineKeyboardButton("🔑 设置密码", callback_data="settings:set_password")],
+    def _main_menu_markup(config=None) -> InlineKeyboardMarkup:
+        """主菜单按钮布局。"""
+        status = get_config_status(config)
+        primary_callback = f"settings:{status.next_action}"
+
+        buttons = [[InlineKeyboardButton(f"➡️ {status.next_label}", callback_data=primary_callback)]]
+
+        buttons.append([
+            InlineKeyboardButton("🔧 API 地址", callback_data="settings:set_api"),
+            InlineKeyboardButton("🔐 API Token", callback_data="settings:set_api_token"),
         ])
-        
-        if has_config:
-            buttons.extend([
-                [InlineKeyboardButton("🎯 设置投稿平台", callback_data="settings:set_upload_target")],
-                [InlineKeyboardButton("🔬 测试连接", callback_data="settings:test")],
-                [InlineKeyboardButton("🗑️ 删除配置", callback_data="settings:delete")],
+
+        if status.has_api_url:
+            buttons.append([
+                InlineKeyboardButton("🎯 投稿平台", callback_data="settings:set_upload_target"),
+                InlineKeyboardButton("🔬 测试", callback_data="settings:test"),
             ])
-        
+            buttons.append([
+                InlineKeyboardButton("🔍 查看", callback_data="settings:view"),
+                InlineKeyboardButton("🗑️ 清空", callback_data="settings:delete"),
+            ])
+        else:
+            buttons.append([InlineKeyboardButton("❓ 帮助", callback_data="main:help")])
+
         buttons.append([InlineKeyboardButton("✅ 完成", callback_data="settings:done")])
-        
         return InlineKeyboardMarkup(buttons)
+
+    @staticmethod
+    def _format_status_panel(config) -> str:
+        """格式化设置首页状态面板。"""
+        status = get_config_status(config)
+        api_display = f"<code>{html.escape(status.api_url)}</code>" if status.has_api_url else "❌ 未设置"
+        if not status.has_api_token:
+            token_display = "❌ 未设置"
+        elif not status.has_valid_api_token:
+            token_display = "⚠️ 格式需要检查"
+        else:
+            token_display = "✅ 已设置"
+
+        ready_display = "✅ 可以转发" if status.is_ready else "⏳ 还差一步"
+        target_display = upload_target_label(status.upload_target)
+
+        return f"""<b>⚙️ 设置中心</b>
+
+<b>当前状态</b>
+• 服务地址：{api_display}
+• API Token：{token_display}
+• 投稿平台：{target_display}
+• 可用状态：{ready_display}
+
+<b>下一步</b>
+{html.escape(status.summary)}"""
 
     @staticmethod
     def _back_markup() -> InlineKeyboardMarkup:
@@ -121,10 +152,10 @@ class SettingsManager:
 
     @staticmethod
     def _skip_back_markup() -> InlineKeyboardMarkup:
-        """跳过和返回按钮（用于密码设置）"""
+        """清除和返回按钮（用于 API Token 设置）"""
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("⏭️ 跳过", callback_data="settings:skip_password"),
+                InlineKeyboardButton("🧹 清除 Token", callback_data="settings:clear_api_token"),
                 InlineKeyboardButton("⬅️ 返回", callback_data="settings:back"),
             ]
         ])
@@ -133,8 +164,16 @@ class SettingsManager:
     def _post_api_markup() -> InlineKeyboardMarkup:
         """API设置成功后的按钮"""
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔬 测试连接", callback_data="settings:test")],
+            [InlineKeyboardButton("🔐 设置 API Token", callback_data="settings:set_api_token")],
             [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
+        ])
+
+    @staticmethod
+    def _post_token_markup() -> InlineKeyboardMarkup:
+        """Token 设置成功后的按钮。"""
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔬 测试连接", callback_data="settings:test")],
+            [InlineKeyboardButton("✅ 完成", callback_data="settings:done")],
         ])
 
     @staticmethod
@@ -146,7 +185,8 @@ class SettingsManager:
             ])
         else:
             return InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔧 修改配置", callback_data="settings:set_api")],
+                [InlineKeyboardButton("🔐 设置 API Token", callback_data="settings:set_api_token")],
+                [InlineKeyboardButton("🔧 修改 API 地址", callback_data="settings:set_api")],
                 [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
             ])
 
@@ -170,17 +210,12 @@ class SettingsManager:
         
         SettingsManager._ensure_user_data(context)
         
-        # 检查是否有配置
         config = UserManager.get_user_config(user.id)
-        has_config = bool(config and config.y2a_api_url)
-        
-        text = """<b>⚙️ 设置</b>
-
-请选择要进行的操作："""
+        text = SettingsManager._format_status_panel(config)
         
         await SettingsManager._safe_reply(
             update, context, text, 
-            reply_markup=SettingsManager._main_menu_markup(has_config)
+            reply_markup=SettingsManager._main_menu_markup(config)
         )
         return SettingsState.MAIN_MENU
 
@@ -197,7 +232,7 @@ class SettingsManager:
         action_labels = {
             "view": "查看配置...",
             "set_api": "设置API地址...",
-            "set_password": "设置密码...",
+            "set_api_token": "设置API Token...",
             "set_upload_target": "设置投稿平台...",
             "upload_target_acfun": "设置为AcFun...",
             "upload_target_bilibili": "设置为bilibili...",
@@ -206,7 +241,7 @@ class SettingsManager:
             "test": "正在测试连接...",
             "delete": "删除配置...",
             "confirm_delete": "正在删除...",
-            "skip_password": "跳过密码设置...",
+            "clear_api_token": "清除API Token...",
             "back": "返回菜单...",
             "done": "完成设置",
         }
@@ -221,7 +256,7 @@ class SettingsManager:
         handlers = {
             "view": SettingsManager._view_config,
             "set_api": SettingsManager._set_api_start,
-            "set_password": SettingsManager._set_password_start,
+            "set_api_token": SettingsManager._set_api_token_start,
             "set_upload_target": SettingsManager._set_upload_target,
             "upload_target_acfun": SettingsManager._save_upload_target,
             "upload_target_bilibili": SettingsManager._save_upload_target,
@@ -230,7 +265,7 @@ class SettingsManager:
             "test": SettingsManager._test_connection,
             "delete": SettingsManager._delete_start,
             "confirm_delete": SettingsManager._delete_confirm,
-            "skip_password": SettingsManager._skip_password,
+            "clear_api_token": SettingsManager._clear_api_token,
             "back": SettingsManager._back_to_menu,
             "done": SettingsManager._done,
         }
@@ -254,26 +289,25 @@ class SettingsManager:
         
         if config and config.y2a_api_url:
             api_url = html.escape(config.y2a_api_url)
-            password_status = "✅ 已设置" if config.y2a_password else "❌ 未设置"
+            status = get_config_status(config)
+            if not status.has_api_token:
+                token_status = "❌ 未设置"
+            elif not status.has_valid_api_token:
+                token_status = "⚠️ 格式需要检查"
+            else:
+                token_status = "✅ 已设置"
             created = config.created_at.strftime('%Y-%m-%d %H:%M') if config.created_at else "未知"
             updated = config.updated_at.strftime('%Y-%m-%d %H:%M') if config.updated_at else "未知"
             
-            target_labels = {"acfun": "AcFun", "bilibili": "bilibili", "both": "同时投稿（AcFun + bilibili）"}
-            raw_target = config.upload_target
-            if raw_target is None:
-                upload_target_display = "服务器默认"
-            elif raw_target in target_labels:
-                upload_target_display = target_labels[raw_target]
-            else:
-                upload_target_display = f"未知值: {html.escape(raw_target)}"
+            upload_target_display = upload_target_label(config.upload_target)
             
             text = f"""<b>🔍 当前配置</b>
 
 <b>API 地址</b>
 <code>{api_url}</code>
 
-<b>密码</b>
-{password_status}
+<b>API Token</b>
+{token_status}
 
 <b>投稿平台</b>
 {upload_target_display}
@@ -300,7 +334,7 @@ class SettingsManager:
         user_data = cast(Dict[str, Any], context.user_data)
         user_data['pending_input'] = 'set_api'
         
-        text = """<b>🔧 设置 API 地址</b>
+        text = """<b>第 1 步：设置 API 地址</b>
 
 请发送您的 Y2A-Auto 服务地址。
 
@@ -309,8 +343,10 @@ class SettingsManager:
 <code>http://192.168.1.100:5000</code>
 <code>localhost:5000</code>
 
-<b>💡 提示</b>
-只需输入主机和端口，路径会自动补全。"""
+<b>💡 说明</b>
+• 只需输入主机和端口，接口路径会自动补全
+• 如果 Bot 运行在服务器上，请填写服务器能访问到的地址
+• 地址保存后，还需要设置专用 API Token"""
         
         await SettingsManager._safe_reply(update, context, text, SettingsManager._back_markup())
         return SettingsState.SET_API_URL
@@ -332,10 +368,6 @@ class SettingsManager:
         
         api_url = message_text.strip()
         
-        # 清除pending状态
-        SettingsManager._ensure_user_data(context)
-        cast(Dict[str, Any], context.user_data).pop('pending_input', None)
-        
         if not api_url:
             await SettingsManager._safe_reply(
                 update, context, 
@@ -350,23 +382,36 @@ class SettingsManager:
             api_url = 'https://' + api_url
         api_url = ForwardManager.normalize_api_url(api_url)
         
-        # 保留现有密码
+        # 保留现有 API Token
         config = UserManager.get_user_config(user.id)
-        password = config.y2a_password if config else None
+        api_token = config.y2a_api_token if config else None
         
         # 保存配置
-        success = UserManager.save_user_config(user.id, api_url, password)
+        success = UserManager.save_user_config(user.id, api_url, api_token)
+        SettingsManager._ensure_user_data(context)
+        cast(Dict[str, Any], context.user_data).pop('pending_input', None)
         
         if success:
+            status = get_config_status(UserManager.get_user_config(user.id))
+            if status.is_ready:
+                from src.managers.guide_manager import GuideManager
+                GuideManager.mark_complete_if_ready(user.id)
+                next_text = "配置已完整。建议点击\"测试连接\"验证服务可达性和 Token 鉴权。"
+                markup = SettingsManager._post_token_markup()
+            else:
+                next_text = "请继续设置专用 API Token。Token 需要在 Y2A-Auto Web 设置页生成。"
+                markup = SettingsManager._post_api_markup()
+
             text = f"""<b>✅ API 地址已设置</b>
 
 <code>{html.escape(api_url)}</code>
 
-建议点击"测试连接"验证配置是否正确。"""
+<b>下一步</b>
+{next_text}"""
             
             await SettingsManager._safe_reply(
                 update, context, text, 
-                SettingsManager._post_api_markup()
+                markup
             )
         else:
             await SettingsManager._safe_reply(
@@ -377,11 +422,11 @@ class SettingsManager:
         
         return SettingsState.MAIN_MENU
 
-    # ==================== 设置密码 ====================
+    # ==================== 设置API Token ====================
 
     @staticmethod
-    async def _set_password_start(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
-        """开始设置密码"""
+    async def _set_api_token_start(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
+        """开始设置 API Token"""
         if user.id is None:
             await SettingsManager._safe_reply(update, context, "❌ 用户信息无效")
             return SettingsState.MAIN_MENU
@@ -390,34 +435,48 @@ class SettingsManager:
         if not config or not config.y2a_api_url:
             await SettingsManager._safe_reply(
                 update, context, 
-                "❌ 请先设置 API 地址",
-                SettingsManager._back_markup()
+                "<b>还不能设置 Token</b>\n\n请先设置 Y2A-Auto API 地址。Bot 需要知道任务提交到哪个服务。",
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔧 设置 API 地址", callback_data="settings:set_api")],
+                    [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
+                ])
             )
             return SettingsState.MAIN_MENU
         
         SettingsManager._ensure_user_data(context)
-        cast(Dict[str, Any], context.user_data)['pending_input'] = 'set_password'
+        cast(Dict[str, Any], context.user_data)['pending_input'] = 'set_api_token'
         
-        current_status = "✅ 当前已设置密码" if config.y2a_password else "❌ 当前未设置密码"
+        status = get_config_status(config)
+        if not status.has_api_token:
+            current_status = "❌ 当前未设置 API Token"
+        elif not status.has_valid_api_token:
+            current_status = "⚠️ 当前 Token 格式需要检查"
+        else:
+            current_status = "✅ 当前已设置 API Token"
         
-        text = f"""<b>🔑 设置密码</b>
+        text = f"""<b>第 2 步：设置 API Token</b>
 
 {current_status}
 
-请发送新密码，或点击"跳过"清除现有密码。
+请发送从 Y2A-Auto Web 设置页生成的 Telegram Bot API Token。
 
-<b>💡 提示</b>
-密码用于自动登录 Y2A-Auto 服务。如果您的服务没有设置密码保护，可以跳过此步骤。"""
+<b>📝 格式</b>
+<code>y2a_tgbot_v1_...</code>
+
+<b>💡 说明</b>
+• Token 只具备提交上传任务权限
+• Bot 会保存该 Token 用于发送任务
+• 保存成功后，机器人会尽量删除您刚发送的 Token 消息"""
         
         await SettingsManager._safe_reply(
             update, context, text, 
             SettingsManager._skip_back_markup()
         )
-        return SettingsState.SET_PASSWORD
+        return SettingsState.SET_API_TOKEN
 
     @staticmethod
-    async def _set_password_end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """处理密码输入"""
+    async def _set_api_token_end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """处理 API Token 输入"""
         user = await UserManager.ensure_user_registered(update, context)
         if not user or user.id is None:
             return SettingsState.MAIN_MENU
@@ -430,33 +489,48 @@ class SettingsManager:
         if not message_text:
             return SettingsState.MAIN_MENU
         
-        password = message_text.strip()
-        
-        # 清除pending状态
-        SettingsManager._ensure_user_data(context)
-        cast(Dict[str, Any], context.user_data).pop('pending_input', None)
+        api_token = message_text.strip()
         
         config = UserManager.get_user_config(user.id)
         if not config or not config.y2a_api_url:
+            SettingsManager._ensure_user_data(context)
+            cast(Dict[str, Any], context.user_data).pop('pending_input', None)
             await SettingsManager._safe_reply(
                 update, context, 
                 "❌ 请先设置 API 地址",
                 SettingsManager._back_markup()
             )
             return SettingsState.MAIN_MENU
+
+        if not is_tgbot_api_token(api_token):
+            await SettingsManager._safe_reply(
+                update, context,
+                "<b>API Token 格式不正确</b>\n\n请复制 Y2A-Auto 设置页生成的完整 Token。它应以 <code>y2a_tgbot_v1_</code> 开头。",
+                SettingsManager._back_markup()
+            )
+            return SettingsState.SET_API_TOKEN
         
-        # 保存密码
-        success = UserManager.save_user_config(user.id, config.y2a_api_url, password)
+        # 保存 API Token
+        success = UserManager.save_user_config(user.id, config.y2a_api_url, api_token)
+        SettingsManager._ensure_user_data(context)
+        cast(Dict[str, Any], context.user_data).pop('pending_input', None)
         
         if success:
-            text = """<b>✅ 密码已设置</b>
+            from src.managers.guide_manager import GuideManager
+            GuideManager.mark_complete_if_ready(user.id)
 
-建议点击"测试连接"验证配置是否正确。"""
+            text = """<b>✅ API Token 已设置</b>
+
+配置已完整。建议点击"测试连接"，确认 Bot 可以成功访问 Y2A-Auto 并通过 Token 鉴权。"""
             
             await SettingsManager._safe_reply(
                 update, context, text, 
-                SettingsManager._post_api_markup()
+                SettingsManager._post_token_markup()
             )
+            try:
+                await message.delete()
+            except Exception as e:
+                logger.debug("无法删除 token 消息: %s", e)
         else:
             await SettingsManager._safe_reply(
                 update, context, 
@@ -467,20 +541,26 @@ class SettingsManager:
         return SettingsState.MAIN_MENU
 
     @staticmethod
-    async def _skip_password(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
-        """跳过/清除密码"""
+    async def _clear_api_token(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
+        """清除 API Token"""
         if user.id is None:
             return SettingsState.MAIN_MENU
+
+        SettingsManager._ensure_user_data(context)
+        cast(Dict[str, Any], context.user_data).pop('pending_input', None)
         
         config = UserManager.get_user_config(user.id)
         if config and config.y2a_api_url:
-            # 清除密码
+            # 清除 API Token
             UserManager.save_user_config(user.id, config.y2a_api_url, "")
             
             await SettingsManager._safe_reply(
                 update, context, 
-                "✅ 已清除密码设置",
-                SettingsManager._back_markup()
+                "<b>✅ 已清除 API Token</b>\n\n清除后 Bot 暂时无法提交上传任务。需要继续使用时，请重新设置 Token。",
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔐 重新设置 Token", callback_data="settings:set_api_token")],
+                    [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
+                ])
             )
         
         return SettingsState.MAIN_MENU
@@ -588,13 +668,29 @@ class SettingsManager:
         if not config or not config.y2a_api_url:
             await SettingsManager._safe_reply(
                 update, context, 
-                "❌ 请先配置 Y2A-Auto 服务",
-                SettingsManager._back_markup()
+                "<b>还不能测试连接</b>\n\n请先设置 Y2A-Auto API 地址。",
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔧 设置 API 地址", callback_data="settings:set_api")],
+                    [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
+                ])
+            )
+            return SettingsState.MAIN_MENU
+
+        status = get_config_status(config)
+        if not status.is_ready:
+            await SettingsManager._safe_reply(
+                update,
+                context,
+                f"<b>还不能测试连接</b>\n\n{html.escape(status.summary)}",
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton(status.next_label, callback_data=f"settings:{status.next_action}")],
+                    [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
+                ])
             )
             return SettingsState.MAIN_MENU
         
         # 显示测试中消息
-        await SettingsManager._safe_reply(update, context, "🔄 正在测试连接...")
+        await SettingsManager._safe_reply(update, context, "🔄 正在测试连接...\n\n正在检查服务可达性和 Token 鉴权。")
         
         # 执行测试
         from src.managers.forward_manager import ForwardManager
@@ -617,11 +713,14 @@ class SettingsManager:
     @staticmethod
     async def _delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
         """开始删除配置"""
+        SettingsManager._ensure_user_data(context)
+        cast(Dict[str, Any], context.user_data).pop('pending_input', None)
+
         text = """<b>⚠️ 删除配置</b>
 
-确定要删除当前配置吗？
+确定要删除当前 Y2A-Auto 配置吗？
 
-删除后您将无法使用转发功能，除非重新配置。"""
+这会清除 API 地址、API Token 和投稿平台偏好。删除后 Bot 将无法提交上传任务，除非重新配置。"""
         
         await SettingsManager._safe_reply(
             update, context, text, 
@@ -634,6 +733,8 @@ class SettingsManager:
         """确认删除配置"""
         if user.id is None:
             return SettingsState.MAIN_MENU
+        SettingsManager._ensure_user_data(context)
+        cast(Dict[str, Any], context.user_data).pop('pending_input', None)
         
         success = UserManager.delete_user_config(user.id)
         
@@ -646,7 +747,7 @@ class SettingsManager:
         
         await SettingsManager._safe_reply(
             update, context, text, 
-            SettingsManager._main_menu_markup(has_config=False)
+            SettingsManager._main_menu_markup(None)
         )
         return SettingsState.MAIN_MENU
 
@@ -664,6 +765,26 @@ class SettingsManager:
     @staticmethod
     async def _done(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> int:
         """完成设置"""
+        config = UserManager.get_user_config(user.id) if user.id is not None else None
+        status = get_config_status(config)
+
+        if not status.is_ready:
+            text = f"""<b>设置尚未完成</b>
+
+{html.escape(status.summary)}
+
+请先完成下一步，之后就可以直接发送 YouTube 链接。"""
+            await SettingsManager._safe_reply(
+                update,
+                context,
+                text,
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton(status.next_label, callback_data=f"settings:{status.next_action}")],
+                    [InlineKeyboardButton("⬅️ 返回", callback_data="settings:back")],
+                ])
+            )
+            return SettingsState.MAIN_MENU
+
         text = """<b>✅ 设置完成</b>
 
 现在您可以直接发送 YouTube 链接进行转发。
@@ -711,10 +832,10 @@ class SettingsManager:
                         pattern=r"^settings:"
                     ),
                 ],
-                SettingsState.SET_PASSWORD: [
+                SettingsState.SET_API_TOKEN: [
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND, 
-                        SettingsManager._set_password_end
+                        SettingsManager._set_api_token_end
                     ),
                     CallbackQueryHandler(
                         SettingsManager.settings_callback, 

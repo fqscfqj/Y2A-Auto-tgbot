@@ -189,7 +189,7 @@ class AdminManager:
             lines.extend([
                 "Y2A-Auto配置:",
                 f"API地址: {config.y2a_api_url}",
-                f"密码: {'已设置' if config.y2a_password else '未设置'}",
+                f"API Token: {'已设置' if config.y2a_api_token else '未设置'}",
                 f"配置时间: {config.created_at.strftime('%Y-%m-%d %H:%M:%S') if config.created_at else '未知'}",
                 f"最后更新: {config.updated_at.strftime('%Y-%m-%d %H:%M:%S') if config.updated_at else '未知'}\n",
             ])

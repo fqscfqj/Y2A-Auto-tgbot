@@ -13,7 +13,7 @@ class GuideStep(Enum):
     SKIPPED = "skipped"                 # 跳过引导
     # 以下保留用于兼容旧数据
     INTRO_FEATURES = "intro_features"   # (已废弃) 介绍功能
-    CONFIG_PASSWORD = "config_password" # (已废弃) 配置密码
+    CONFIG_PASSWORD = "config_password" # (已废弃) 旧配置步骤
     TEST_CONNECTION = "test_connection" # (已废弃) 测试连接
     SEND_EXAMPLE = "send_example"       # (已废弃) 发送示例链接
 
@@ -65,7 +65,7 @@ class UserConfig:
     id: Optional[int] = None
     user_id: Optional[int] = None
     y2a_api_url: Optional[str] = None
-    y2a_password: Optional[str] = None
+    y2a_api_token: Optional[str] = None
     upload_target: Optional[str] = None  # acfun|bilibili|both，None表示使用服务器默认值
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -80,7 +80,7 @@ class UserConfig:
             id=data.get('id'),
             user_id=data.get('user_id'),
             y2a_api_url=data.get('y2a_api_url'),
-            y2a_password=data.get('y2a_password'),
+            y2a_api_token=data.get('y2a_api_token'),
             upload_target=data.get('upload_target'),
             created_at=created_at,
             updated_at=updated_at
@@ -92,7 +92,7 @@ class UserConfig:
             'id': self.id,
             'user_id': self.user_id,
             'y2a_api_url': self.y2a_api_url,
-            'y2a_password': self.y2a_password,
+            'y2a_api_token': self.y2a_api_token,
             'upload_target': self.upload_target,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None

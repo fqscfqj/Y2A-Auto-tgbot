@@ -90,24 +90,24 @@ class UserManager:
         return config is not None
     
     @staticmethod
-    def save_user_config(user_id: int, y2a_api_url: str, y2a_password: Optional[str] = None,
+    def save_user_config(user_id: int, y2a_api_url: str, y2a_api_token: Optional[str] = None,
                          upload_target: Optional[str] = None) -> bool:
         """保存用户配置"""
         # 检查是否已有配置
         config = UserConfigRepository.get_by_user_id(user_id)
         
         if config:
-            # 更新现有配置（如果传入 None，则保留现有密码或使用空字符串以匹配函数签名）
-            password_to_use = y2a_password if y2a_password is not None else (config.y2a_password or "")
+            # 更新现有配置（如果传入 None，则保留现有 API Token）
+            token_to_use = y2a_api_token if y2a_api_token is not None else (config.y2a_api_token or "")
             # upload_target 传入 None 时保留现有值
             target_to_use = upload_target if upload_target is not None else config.upload_target
-            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, password_to_use, target_to_use)
+            return UserConfigRepository.update_by_user_id(user_id, y2a_api_url, token_to_use, target_to_use)
         else:
             # 创建新配置
             new_config = UserConfig(
                 user_id=user_id,
                 y2a_api_url=y2a_api_url,
-                y2a_password=y2a_password,
+                y2a_api_token=y2a_api_token,
                 upload_target=upload_target,
                 created_at=datetime.now(),
                 updated_at=datetime.now()
@@ -189,7 +189,7 @@ class UserManager:
                 "",  # Empty line
                 "Y2A-Auto配置:",
                 f"API地址: {config.y2a_api_url}",
-                f"密码: {'已设置' if config.y2a_password else '未设置'}",
+                f"API Token: {'已设置' if config.y2a_api_token else '未设置'}",
                 f"配置时间: {config.created_at.strftime('%Y-%m-%d %H:%M:%S') if config.created_at else '未知'}",
             ])
         else:

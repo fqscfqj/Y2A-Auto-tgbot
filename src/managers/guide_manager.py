@@ -2,7 +2,7 @@
 引导管理器 - 简化版
 
 流程：欢迎 → 配置API → 完成
-密码配置移至设置菜单（可选）
+API Token 配置移至设置菜单
 """
 import logging
 import html
@@ -40,7 +40,7 @@ class GuideManager:
     2. 配置API - 输入Y2A-Auto API地址
     3. 完成 - 配置成功，可以开始使用
     
-    密码配置为可选，用户可在设置中添加。
+    API Token 配置在设置菜单中完成。
     """
     
     # 示例YouTube链接
@@ -181,7 +181,7 @@ class GuideManager:
 <b>💡 提示</b>
 • 配置完成后，直接发送 YouTube 链接即可转发
 • 支持视频和播放列表链接
-• 如需密码认证，可在设置中配置"""
+• 如需提交任务，请在设置中配置专用 API Token"""
         
         await GuideManager._safe_send(update, context, text, GuideManager._welcome_markup())
         return GuideState.WELCOME
@@ -208,7 +208,7 @@ class GuideManager:
 <b>💡 提示</b>
 • 只需输入主机和端口，路径会自动补全
 • 支持 http 和 https 协议
-• 如果服务需要密码，配置完成后可在设置中添加"""
+• 配置完成后，请在设置中添加专用 API Token"""
         
         await GuideManager._safe_send(update, context, text, GuideManager._config_api_markup())
         return GuideState.CONFIG_API
@@ -223,7 +223,7 @@ class GuideManager:
 
 <b>🔧 后续操作</b>
 • 发送链接 - 直接粘贴 YouTube 链接即可
-• 设置 - 修改配置、添加密码、测试连接
+• 设置 - 修改配置、添加 API Token、测试连接
 • 帮助 - 查看详细使用说明"""
         
         await GuideManager._safe_send(update, context, text, GuideManager._complete_markup())
@@ -415,7 +415,7 @@ API 地址：<code>{html.escape(api_url)}</code>
 
 <b>💡 建议</b>
 • 点击"测试连接"验证配置是否正确
-• 如需密码，可在设置中添加"""
+• 请继续在设置中添加专用 API Token"""
             
             markup = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔬 测试连接", callback_data="test_connection")],
@@ -433,11 +433,11 @@ API 地址：<code>{html.escape(api_url)}</code>
     
     @staticmethod
     async def handle_password_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """处理密码输入（兼容旧流程）- 重定向到设置"""
+        """处理旧流程输入 - 重定向到设置"""
         message = update.message
         if message:
             await message.reply_text(
-                "💡 密码配置已移至设置菜单。请完成引导后在设置中添加密码。",
+                "💡 API Token 配置已移至设置菜单。请完成引导后在设置中添加专用 API Token。",
                 parse_mode='HTML'
             )
         return ConversationHandler.END

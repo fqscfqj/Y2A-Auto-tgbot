@@ -25,6 +25,7 @@ class UserConfigTokenTests(unittest.TestCase):
         self.assertFalse(is_tgbot_api_token("wrong_" + "a" * 32))
         self.assertFalse(is_tgbot_api_token("y2a_tgbot_v1_short"))
         self.assertFalse(is_tgbot_api_token("y2a_tgbot_v1_" + "!" * 32))
+        self.assertFalse(is_tgbot_api_token("y2a_tgbot_v1_" + "测" * 32))
 
     def test_config_status_guides_next_step(self):
         missing = get_config_status(None)

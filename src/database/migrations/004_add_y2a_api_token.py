@@ -2,7 +2,7 @@
 添加 y2a_api_token 字段并清理旧明文密码
 """
 import logging
-from src.database.db import execute_query, execute_script
+from src.database.db import execute_query, execute_update
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,8 @@ def run_migration():
         return True
 
     try:
-        execute_script(";\n".join(statements) + ";")
+        for statement in statements:
+            execute_update(statement)
         logger.info("y2a_api_token 字段迁移完成")
         return True
     except Exception as e:

@@ -1,10 +1,12 @@
 from dataclasses import dataclass
+import re
 from typing import Optional
 
 from src.database.models import UserConfig
 
 
 TG_BOT_API_TOKEN_PREFIX = "y2a_tgbot_v1_"
+_TOKEN_RANDOM_PART_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 
 
 @dataclass(frozen=True)
@@ -25,7 +27,7 @@ def is_tgbot_api_token(token: str) -> bool:
     if not token.startswith(TG_BOT_API_TOKEN_PREFIX):
         return False
     random_part = token[len(TG_BOT_API_TOKEN_PREFIX):]
-    return len(random_part) >= 32 and all(ch.isalnum() or ch in "_-" for ch in random_part)
+    return bool(_TOKEN_RANDOM_PART_RE.fullmatch(random_part))
 
 
 def get_config_status(config: Optional[UserConfig]) -> ConfigStatus:

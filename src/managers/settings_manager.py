@@ -529,8 +529,8 @@ class SettingsManager:
             )
             try:
                 await message.delete()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("无法删除 token 消息: %s", e)
         else:
             await SettingsManager._safe_reply(
                 update, context, 

@@ -143,13 +143,16 @@ def require_configured_user(func: Callable) -> Callable:
             # 检查用户是否已配置
             from src.managers.user_manager import UserManager
             if not UserManager.is_user_configured(telegram_user.id):
+                user = UserManager.get_user(telegram_user.id)
+                config = UserManager.get_user_config(user.id) if user and user.id is not None else None
+                from src.utils.config_status import get_config_status
+                status = get_config_status(config)
+                message_text = f"配置尚未完成：{status.summary}\n\n请使用 /settings 继续配置。"
                 if update.message:
-                    await update.message.reply_text(
-                        "您尚未配置Y2A-Auto服务，请使用 /settings 命令进行配置"
-                    )
+                    await update.message.reply_text(message_text)
                 elif update.callback_query:
                     await update.callback_query.answer(
-                        "您尚未配置Y2A-Auto服务，请使用 /settings 命令进行配置", show_alert=True
+                        message_text, show_alert=True
                     )
                 else:
                     logger.info("用户未配置，但无法通知：既没有 message 也没有 callback_query")

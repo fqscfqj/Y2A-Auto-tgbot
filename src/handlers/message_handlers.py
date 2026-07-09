@@ -66,6 +66,7 @@ class MessageHandlers:
             "main:settings": "打开设置...",
             "main:help": "显示帮助...",
             "main:send_example": "发送示例链接...",
+            "main:test_connection": "正在测试连接...",
             "test_connection": "正在测试连接...",
         }
         answer_text = action_labels.get(data, "处理中...")
@@ -88,16 +89,10 @@ class MessageHandlers:
             await ForwardManager.handle_help_command(update, context)
         elif data == "main:send_example":
             await ForwardManager.forward_youtube_url(update, context, GuideManager.EXAMPLE_YOUTUBE_URL)
-        elif data == "test_connection":
-            # 兼容引导完成后的测试连接按钮
+        elif data in ("main:test_connection", "test_connection"):
             user = await UserManager.ensure_user_registered(update, context)
             if user and user.id:
-                config = UserManager.get_user_config(user.id)
-                if config:
-                    result = await ForwardManager.test_connection(update, context, user, config)
-                    message = update.effective_message
-                    if message:
-                        await message.reply_text(f"🔬 测试结果\n\n{result}")
+                await SettingsManager._test_connection(update, context, user)
         else:
             # 未识别的回调，忽略
             return
@@ -107,5 +102,5 @@ class MessageHandlers:
         """获取主菜单回调处理器"""
         return CallbackQueryHandler(
             MessageHandlers.handle_main_menu_callback, 
-            pattern=r"^(main:|test_connection)"
+            pattern=r"^(main:|test_connection$)"
         )

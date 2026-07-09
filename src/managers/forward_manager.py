@@ -17,6 +17,7 @@ from src.managers.user_manager import UserManager
 from src.database.models import User, UserConfig, ForwardRecord
 from src.database.repository import ForwardRecordRepository, UserStatsRepository
 from src.utils.resource_manager import OperationContext, resource_manager
+from src.utils.config_status import TG_BOT_API_TOKEN_PREFIX as CONFIG_TOKEN_PREFIX, get_config_status, is_tgbot_api_token
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ class RateLimiter:
 class ForwardManager:
     """转发管理器，负责处理YouTube链接的转发逻辑"""
     
-    TG_BOT_API_TOKEN_PREFIX = "y2a_tgbot_v1_"
+    TG_BOT_API_TOKEN_PREFIX = CONFIG_TOKEN_PREFIX
     # 速率限制器
     _rate_limiter = RateLimiter(max_requests=30, time_window=60)  # 每分钟最多30个请求
     # 标记是否已初始化
@@ -197,6 +198,19 @@ class ForwardManager:
         if include_example:
             keyboard.insert(0, [InlineKeyboardButton("🎯 发送示例", callback_data="main:send_example")])
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def next_step_markup(config: Optional[UserConfig]) -> InlineKeyboardMarkup:
+        """根据配置状态生成下一步按钮。"""
+        status = get_config_status(config)
+        primary_callback = f"settings:{status.next_action}"
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(status.next_label, callback_data=primary_callback)],
+            [
+                InlineKeyboardButton("⚙️ 设置", callback_data="main:settings"),
+                InlineKeyboardButton("❓ 帮助", callback_data="main:help"),
+            ],
+        ])
     
     @staticmethod
     def is_youtube_url(text: str) -> bool:
@@ -223,11 +237,7 @@ class ForwardManager:
 
     @staticmethod
     def is_tgbot_api_token(token: str) -> bool:
-        token = str(token or '').strip()
-        if not token.startswith(ForwardManager.TG_BOT_API_TOKEN_PREFIX):
-            return False
-        random_part = token[len(ForwardManager.TG_BOT_API_TOKEN_PREFIX):]
-        return len(random_part) >= 32 and all(ch.isalnum() or ch in '_-' for ch in random_part)
+        return is_tgbot_api_token(token)
 
     @staticmethod
     async def _send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -300,38 +310,33 @@ class ForwardManager:
     @staticmethod 
     async def _forward_youtube_internal(update: Update, context: ContextTypes.DEFAULT_TYPE, youtube_url: str, user: User) -> None:
         """内部转发逻辑，已在资源管理器保护下"""
-        if not UserManager.is_user_configured(user.telegram_id):
-            # 检查用户引导状态
-            user_id = user.id
-            guide = None
-            if user_id is not None:
-                guide = UserManager.get_user_guide(user_id)
-            
-            if guide and not guide.is_completed and not guide.is_skipped:
-                # 用户正在引导过程中，提示继续引导
-                message = update.effective_message or update.message
-                await ForwardManager._safe_send(
-                    update,
-                    context,
-                    "您尚未完成配置。请继续引导流程完成配置，或点击下方按钮打开设置。",
-                    reply_markup=ForwardManager.main_menu_markup(),
-                )
-            else:
-                # 用户未开始引导或已跳过引导
-                await ForwardManager._safe_send(
-                    update,
-                    context,
-                    "您尚未配置Y2A-Auto服务。可点击下方按钮开始引导或进入设置：",
-                    reply_markup=ForwardManager.main_menu_markup(),
-                )
-            return
-        
-        # 获取用户配置
         user_data = UserManager.get_user_with_config(user.telegram_id)
         config = user_data[1]
-        
-        if not config or not getattr(config, 'y2a_api_url', None):
-            await ForwardManager._safe_send(update, context, "您的Y2A-Auto配置不完整，请使用 /settings 命令重新配置")
+
+        status = get_config_status(config)
+        if not status.is_ready:
+            if not status.has_api_url:
+                prompt = (
+                    "已检测到 YouTube 链接，但 Bot 还不知道要提交到哪个 Y2A-Auto 服务。\n\n"
+                    "请先设置 API 地址，然后再配置专用 API Token。"
+                )
+            elif not status.has_api_token:
+                prompt = (
+                    "已检测到 YouTube 链接，但还缺少 Telegram Bot API Token。\n\n"
+                    "请在 Y2A-Auto Web 设置页生成 Token，然后回到这里粘贴。"
+                )
+            else:
+                prompt = (
+                    "已检测到 YouTube 链接，但当前 API Token 格式不正确。\n\n"
+                    "请重新复制主服务生成的完整 Token。"
+                )
+
+            await ForwardManager._safe_send(
+                update,
+                context,
+                prompt,
+                reply_markup=ForwardManager.next_step_markup(config),
+            )
             return
         
         # 发送正在转发的消息（安全访问 message）
@@ -407,9 +412,9 @@ class ForwardManager:
 
         api_token = str(getattr(config, 'y2a_api_token', '') or '').strip()
         if not api_token:
-            return False, "Y2A-Auto API Token 未配置，请在设置中填写专用 Token。"
-        if not ForwardManager.is_tgbot_api_token(api_token):
-            return False, "Y2A-Auto API Token 格式不正确，请重新复制主服务设置页生成的 Token。"
+            return False, "还没有配置 Telegram Bot API Token。请打开设置并填写专用 Token。"
+        if not is_tgbot_api_token(api_token):
+            return False, "API Token 格式不正确。请重新复制主服务设置页生成的完整 Token。"
         
         # 构建请求体，包含可选的upload_target
         request_body: dict = {'youtube_url': youtube_url}
@@ -434,7 +439,7 @@ class ForwardManager:
                                 message = data.get('message') or 'Token 无效或权限不足'
                             except json.JSONDecodeError:
                                 message = 'Token 无效或权限不足'
-                            return False, f"Y2A-Auto 拒绝请求：{message}"
+                            return False, f"Y2A-Auto 拒绝请求：{message}。请检查 Token 是否已重置、撤销或复制错误。"
 
                         if 200 <= status < 300:
                             try:
@@ -448,26 +453,26 @@ class ForwardManager:
                                     status,
                                     body_preview,
                                 )
-                                return False, "Y2A-Auto 返回非 JSON 响应，请检查服务是否正常"
+                                return False, "Y2A-Auto 返回了无法识别的响应。请确认 API 地址指向 /tasks/add_via_extension。"
                             if data.get('success'):
                                 return True, data.get('message', '已添加任务')
                             else:
                                 return False, data.get('message', '未知错误')
                         else:
-                            return False, f"Y2A-Auto接口请求失败，状态码：{status}"
+                            return False, f"Y2A-Auto 接口请求失败，状态码：{status}。请稍后重试或检查服务日志。"
 
                 except asyncio.TimeoutError:
                     logger.warning("Y2A-Auto 请求超时，尝试重试（attempt=%s）", attempt)
                     if attempt < max_attempts - 1:
                         # 还有重试机会，继续下一轮
                         continue
-                    return False, "请求超时，请检查网络连接或服务器状态"
+                    return False, "请求超时。请确认 Bot 所在环境可以访问 Y2A-Auto 服务。"
                 except aiohttp.ClientError as e:
                     logger.error("异步请求客户端异常 (attempt=%s): %s", attempt, e)
                     if attempt < max_attempts - 1:
                         # 还有重试机会，继续下一轮
                         continue
-                    return False, f"网络请求异常：{e}"
+                    return False, "网络请求失败。请检查 API 地址、端口、防火墙或 TLS 证书配置。"
 
             return False, "Y2A-Auto请求失败，已重试"
 
@@ -519,8 +524,14 @@ class ForwardManager:
 
         # 若不是 YouTube 链接，提示用户
         if not text or not ForwardManager.is_youtube_url(text):
-            reply_markup = ForwardManager.main_menu_markup(include_example=True)
-            prompt = '请发送 YouTube 视频或播放列表链接。'
+            config = UserManager.get_user_config(user.id) if user and user.id is not None else None
+            status = get_config_status(config)
+            if not status.is_ready:
+                reply_markup = ForwardManager.next_step_markup(config)
+                prompt = f"这条消息不是 YouTube 链接。\n\n{status.summary}\n\n请先完成配置，然后直接发送 YouTube 视频或播放列表链接。"
+            else:
+                reply_markup = ForwardManager.main_menu_markup(include_example=True)
+                prompt = "请发送 YouTube 视频或播放列表链接。\n\n支持 youtube.com/watch、youtu.be 和 youtube.com/playlist。"
             if message_obj is not None:
                 await message_obj.reply_text(prompt, reply_markup=reply_markup)
             else:
@@ -540,10 +551,14 @@ class ForwardManager:
             return "❌ Y2A-Auto API 地址未配置"
         clean_url = ForwardManager.parse_api_url(api_url)
 
+        status = get_config_status(config)
+        if not status.is_ready:
+            return f"❌ {status.summary}"
+
         api_token = str(getattr(config, 'y2a_api_token', '') or '').strip()
         if not api_token:
             return "❌ Y2A-Auto API Token 未配置"
-        if not ForwardManager.is_tgbot_api_token(api_token):
+        if not is_tgbot_api_token(api_token):
             return "❌ Y2A-Auto API Token 格式不正确"
         
         session = await get_aiohttp_session()
@@ -568,16 +583,17 @@ class ForwardManager:
                         message = data.get('message') or 'Token 无效或权限不足'
                     except json.JSONDecodeError:
                         message = 'Token 无效或权限不足'
-                    return f"❌ 服务可达，但 {message}"
-                return f"⚠️ 服务可达，但返回状态码：{resp.status}"
+                    return f"❌ 服务可达，但 {message}。请检查 Token 是否已重置、撤销或复制错误。"
+                return f"⚠️ 服务可达，但返回状态码：{resp.status}。请检查 Y2A-Auto 服务日志。"
         except asyncio.TimeoutError:
-            return "❌ 连接失败，请求超时"
+            return "❌ 连接失败，请求超时。请确认 Bot 所在环境可以访问 Y2A-Auto 服务。"
         except aiohttp.ClientConnectorError:
             return "❌ 连接失败，无法连接到服务器（网络/端口/防火墙）"
         except aiohttp.ClientSSLError:
             return "❌ 连接失败，TLS/证书错误，可尝试使用 http 或正确配置证书"
         except aiohttp.ClientError as e:
-            return f"❌ 连接失败：{e}"
+            logger.error("连接测试失败: %s", e)
+            return "❌ 连接失败。请检查 API 地址、端口、防火墙或 TLS 证书配置。"
     
     @staticmethod
     async def handle_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

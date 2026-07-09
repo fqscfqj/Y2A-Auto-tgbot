@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 from src.database.models import User, UserConfig, UserGuide, GuideStep
 from src.database.repository import UserRepository, UserConfigRepository, UserGuideRepository
+from src.utils.config_status import ConfigStatus, get_config_status
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,11 @@ class UserManager:
         """检查用户是否有配置"""
         config = UserConfigRepository.get_by_user_id(user_id)
         return config is not None
+
+    @staticmethod
+    def get_user_config_status(user_id: int) -> ConfigStatus:
+        """获取用户配置完成度。"""
+        return get_config_status(UserConfigRepository.get_by_user_id(user_id))
     
     @staticmethod
     def save_user_config(user_id: int, y2a_api_url: str, y2a_api_token: Optional[str] = None,
@@ -145,7 +151,7 @@ class UserManager:
     
     @staticmethod
     def is_user_configured(telegram_id: int) -> bool:
-        """检查用户是否已配置Y2A-Auto"""
+        """检查用户是否已完成可转发所需配置。"""
         user = UserRepository.get_by_telegram_id(telegram_id)
         if not user:
             return False
@@ -155,7 +161,7 @@ class UserManager:
             return False
 
         config = UserConfigRepository.get_by_user_id(int(user.id))
-        return bool(config and config.y2a_api_url)
+        return get_config_status(config).is_ready
     
     @staticmethod
     async def ensure_user_registered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> User:

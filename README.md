@@ -108,7 +108,7 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 | API 地址 | Y2A-Auto 服务的 Web 访问地址（只需主机 + 端口，路径会自动补全） | `http://192.168.1.100:5000` |
 | API Token | Y2A-Auto Web → **设置** → **运维与安全** → 「Telegram Bot API Token」卡片点击「生成 Token」 | `y2a_tgbot_v1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
 
-> ❗ 本机器人**不再使用 Y2A-Auto 的 Web 登录密码**。当机器人提示「请设置 API Token」时，请按下面第 3 步在 Y2A-Auto 设置页生成，再回到机器人粘贴。
+> ❗ 本机器人**不再使用 Y2A-Auto 的 Web 登录密码**。当机器人提示您需要「设置 API Token」时，请按下面第 3 步在 Y2A-Auto 设置页生成，再回到机器人粘贴。
 
 #### 步骤 1：确认 Y2A-Auto 服务已启动
 
@@ -138,14 +138,20 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 
 1. 打开 Y2A-Auto Web 界面并登录，默认 `http://localhost:5000`
 2. 点击左侧导航 **设置**（页面地址为 `/settings`，页面标题「系统设置」）
-3. 向下滚动到 **运维与安全** 分组，找到 **Telegram Bot API Token** 卡片（副标题为「最小权限 API」，右上角状态默认为「未配置」）
-4. 点击 **生成 Token**，在浏览器弹窗中确认（若已配置过，按钮显示为「重置 Token」）
-5. ⚠️ **明文 Token 只会显示一次**，出现后请立刻复制整串内容，形如：
+3. 点击 **运维与安全** 标签页（也可直接访问 `http://你的地址:5000/settings#vtab-ops`）
+4. 在该分组里找到 **Telegram Bot API Token** 卡片（标题上方标注「最小权限 API」，右上角状态默认为「未配置」）
+5. 点击 **生成 Token**，在浏览器弹窗中确认（若已配置过，按钮显示为「重置 Token」）
+6. ⚠️ **明文 Token 只会显示一次**，出现后请立刻复制整串内容，形如：
    ```
    y2a_tgbot_v1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
-6. 先粘贴到机器人或密码管理器中保存，再关闭页面；关闭页面后无法再次查看，只能重新生成
-7. 页面上可随时查看当前状态（是否已配置、Token 尾号、生成时间），并提供 **撤销 Token** 按钮
+7. 先粘贴到机器人或密码管理器中保存，再关闭页面；关闭页面后无法再次查看，只能重新生成
+8. 页面上可随时查看当前状态（是否已配置、Token 尾号、生成时间），并提供 **撤销 Token** 按钮
+
+> 如果「运维与安全」里没有这张卡片，说明主服务版本较旧，请先更新 Y2A-Auto 后重试：
+> ```bash
+> docker compose pull && docker compose up -d
+> ```
 
 关于这个 Token，需要了解：
 
@@ -153,6 +159,7 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 - **不能**访问设置、日志、任务管理、维护等接口，也不使用 Web 登录密码
 - 生成 / 重置新 Token 会让旧 Token **立即失效**；「撤销 Token」后机器人将无法提交新任务
 - Y2A-Auto 只保存 Token 的哈希值，页面仅显示尾号和生成时间，无法反查明文
+- 机器人这边会把 Token 存到自己的本地数据库（SQLite `data/app.db` 的 `user_configs.y2a_api_token` 字段），请保护好该数据库文件；不再需要时可用「🧹 清除 Token」或删除配置移除
 
 #### 步骤 4：在机器人中填写 API Token
 
@@ -166,8 +173,8 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 
 1. 在设置菜单点击 **🔬 测试**（首次配置完成时机器人也会提供「测试连接」按钮）
 2. 机器人会向你的 Y2A-Auto 提交一个空任务来验证「地址 + Token」是否同时有效，返回结果含义：
-   - ✅ 连接成功，Token 有效
-   - ✅ 服务可达，Token 已通过鉴权（Y2A-Auto 返回「YouTube URL不能为空」，属正常回包）
+   - ✅ 连接成功，Token 有效（Y2A-Auto 会返回「YouTube URL不能为空」这类正常回包，说明地址与 Token 都正确）
+   - ✅ 服务可达，Token 已通过鉴权（服务返回 400 但提示文案不同，同样表示鉴权通过）
    - ❌ 服务可达，但 Token 无效或权限不足 → Token 被重置 / 撤销 / 复制不完整
    - ⚠️ 服务可达，但返回其他状态码 → 请查看 Y2A-Auto 服务日志
    - ❌ 连接失败，无法连接到服务器 → 检查地址、端口、防火墙
@@ -186,7 +193,7 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 | 机器人提示「已保存 API 地址，还需要配置专用 API Token」 | 只填了 API 地址 | 完成本教程步骤 3–4 |
 | 机器人提示「API Token 格式不正确」 | Token 复制不完整 / 夹带空格 / 错把 Web 密码当成 Token | 重新复制 `y2a_tgbot_v1_` 开头的完整 Token |
 | 测试返回 401 / 403 | Token 已被重置、撤销或填错 | 在 Y2A-Auto 设置页重新生成 Token 并更新机器人 |
-| 测试返回 404 | 地址缺少路径或端口写错 | 只填 `http(s)://主机:端口`，让机器人自动补全路径 |
+| 测试返回 404 | 该地址指向的不是 Y2A-Auto（端口被其他服务占用、反向代理改写了路径） | 确认 `http(s)://主机:端口` 能打开 Y2A-Auto 的 Web 界面，并去掉多余的路径改写 |
 | 测试超时 / 无法连接 | 机器人无法访问该地址 | 检查端口放行、Docker 网络、反向代理，必要时改用内网 IP |
 | 生成 Token 后请求仍被拒绝 | 仍是旧 Token | 重新生成会作废旧 Token，请在机器人中更新为最新 Token |
 
@@ -202,7 +209,7 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 
 1. **克隆项目**
    ```bash
-   git clone https://github.com/yourusername/Y2A-Auto-tgbot.git
+   git clone https://github.com/fqscfqj/Y2A-Auto-tgbot.git
    cd Y2A-Auto-tgbot
    ```
 
@@ -225,7 +232,7 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 
 1. **克隆项目**
    ```bash
-   git clone https://github.com/yourusername/Y2A-Auto-tgbot.git
+   git clone https://github.com/fqscfqj/Y2A-Auto-tgbot.git
    cd Y2A-Auto-tgbot
    ```
 
@@ -288,7 +295,7 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 
 > ❗ 机器人使用 Y2A-Auto 设置页生成的**专用 Token**，**不再需要** Y2A-Auto 的 Web 登录密码。
 
-1. 在 Y2A-Auto Web 界面打开 **设置 → 运维与安全 → Telegram Bot API Token**，点击「生成 Token」并**立即复制**（明文只显示一次）
+1. 在 Y2A-Auto Web 界面点击 **设置 → 运维与安全 → Telegram Bot API Token**（也可直接访问 `/settings#vtab-ops`），点击「生成 Token」并**立即复制**（明文只显示一次）
 2. 回到机器人，点击「🔐 API Token」
 3. 直接把 `y2a_tgbot_v1_` 开头的完整 Token 发送给机器人
 4. 机器人校验格式通过后即保存；如需清除，点击提示中的「🧹 清除 Token」
@@ -402,7 +409,7 @@ Keep your token secure and store it safely, it can be used by anyone to control 
 |--------|------|------|------|
 | `TG_BOT_TOKEN` | 是 | Telegram 机器人的 Bot Token，通过 [@BotFather](https://t.me/BotFather) 创建机器人获取（见 [教程一](#教程一创建-telegram-机器人并获取-bot-token)） | `123456789:ABCdefGHijKLmnoPqrsTuVwxyz` |
 | `ADMIN_TELEGRAM_IDS` | 否 | 管理员的Telegram用户ID列表，多个ID用逗号分隔 | `123456789,987654321` |
-| `LOG_LEVEL` | 否 | 日志级别，默认为INFO | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOG_LEVEL` | 否 | 日志级别（预留变量，当前版本代码固定输出 INFO，尚未读取该变量） | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 > 📌 **注意区分两种 Token**：
 > - `TG_BOT_TOKEN`（Bot Token，形如 `123456789:AAE...`）：机器人自身的凭证，属于**部署者**的环境变量，每个 Bot 只有一个。
@@ -456,6 +463,7 @@ Y2A-Auto-tgbot/
 │   │   ├── guide_manager.py
 │   │   ├── settings_manager.py
 │   │   ├── user_manager.py
+│   │   ├── session_manager.py
 │   │   └── admin_manager.py
 │   │
 │   ├── handlers/
@@ -463,9 +471,15 @@ Y2A-Auto-tgbot/
 │   │   └── message_handlers.py
 │   │
 │   └── utils/
+│       ├── config_status.py   # 配置状态与 API Token 格式校验
 │       ├── decorators.py
 │       ├── error_handler.py
+│       ├── memory_monitor.py
+│       ├── resource_manager.py
 │       └── logger.py
+│
+├── tests/
+│   └── test_user_config_token.py
 │
 └── data/
     ├── app.db
@@ -497,7 +511,7 @@ A: 在 Telegram 中打开 [@BotFather](https://t.me/BotFather)，发送 `/newbot
 A: 这个 Token 由 **Y2A-Auto 服务**生成，不是 Telegram 的 Bot Token。获取步骤如下：
 1. 打开并登录 Y2A-Auto Web 界面（默认 `http://localhost:5000`）
 2. 进入左侧导航 **设置**（页面地址 `/settings`）
-3. 滚动到 **运维与安全** 分组，找到 **Telegram Bot API Token** 卡片（副标题「最小权限 API」）
+3. 点击 **运维与安全** 标签页（也可直接访问 `http://你的地址:5000/settings#vtab-ops`），找到 **Telegram Bot API Token** 卡片（标注「最小权限 API」）
 4. 点击 **生成 Token** 并在弹窗中确认
 5. ⚠️ 明文 Token 只会显示一次，请立即复制 `y2a_tgbot_v1_` 开头的整串内容
 6. 回到机器人，发送 `/settings` → 点击 **🔐 API Token**，把 Token 直接粘贴发送
@@ -581,7 +595,7 @@ A: 日志文件位于 `data/logs/` 目录下，包括：
 - 您的 Y2A-Auto 配置（API 地址与 API Token）会被保存在本地 SQLite 数据库中
 - 机器人不再接收和保存 Y2A-Auto 的 Web 登录密码；如需修改密码，请直接在 Y2A-Auto Web 界面操作
 - 转发记录会被保存，但仅用于统计和故障排除
-- 管理员可以查看用户统计信息，但无法查看您的具体配置内容
+- 管理员可以查看用户统计信息与配置状态（API 地址、API Token 是否已设置），但无法查看 Token 内容
 
 ### 数据导出
 如果您需要导出您的使用数据，请联系管理员。
